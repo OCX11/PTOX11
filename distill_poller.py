@@ -69,7 +69,7 @@ log = logging.getLogger(__name__)
 _SOURCE_MAP: List[Tuple[str, str, str, bool]] = [
     # DISABLED — classic.com: dedup key collision with BaT, API access pending (insight@classic.com).
     # ("classic.com",           "classic.com",        "AUCTION", False),
-    ("cars.com",              "cars.com",            "RETAIL",  True),   # handled by scraper_carscom.py
+    ("cars.com",              "cars.com",            "RETAIL",  False),  # back on Distill — Cloudflare blocks scraper
     ("autotrader.com",        "AutoTrader",          "RETAIL",  True),   # handled by scraper_autotrader.py
     ("rennlist.com",          "Rennlist",            "RETAIL",  True),   # handled by scraper_rennlist.py
     ("builtforbackroads.com", "Built for Backroads", "RETAIL",  False),

@@ -1,5 +1,5 @@
 # Vehicle Market Analyzer — Project Handover Summary
-*Last updated: April 4, 2026*
+*Last updated: April 8, 2026*
 
 ---
 
@@ -59,7 +59,7 @@ Owner operates a small, focused performance car dealership. All purchases are ev
 ~/porsche-tracker/
 ├── scraper.py              # BaT, PCA Mart, pcarmarket scrapers + DEALERS list
 ├── scraper_autotrader.py   # AutoTrader Playwright scraper (mobile site) — LIVE ✅
-├── scraper_carscom.py      # Cars.com Playwright scraper — LIVE ✅
+├── scraper_carscom.py      # Cars.com scraper — PARKED (Cloudflare blocks; Distill handles Cars.com)
 ├── scraper_ebay.py         # eBay Browse API scraper — LIVE ✅
 ├── scraper_rennlist.py     # Rennlist Playwright scraper — LIVE ✅ (April 4)
 ├── distill_poller.py       # Polls Distill Web Monitor → inserts BfB only (all others migrated)
@@ -96,20 +96,27 @@ Owner operates a small, focused performance car dealership. All purchases are ev
 | Bring a Trailer | `scraper.py` Playwright | ✅ LIVE | ✅ Yes |
 | eBay Motors | `scraper_ebay.py` (eBay Browse API) | ✅ LIVE | ✅ Yes |
 | PCA Mart | `scraper.py` (cookie-auth) | ✅ LIVE | ❌ Local paths |
-| cars.com | `scraper_carscom.py` (curl_cffi + data-vehicle-details JSON) | ✅ LIVE | ✅ Yes |
+| cars.com | Distill Desktop → `distill_poller.py` — **private listings only** | ✅ LIVE (Distill) | ❌ No (Distill text mode) |
 | Rennlist | `scraper_rennlist.py` Playwright — migrated off Distill April 4 | ✅ LIVE | ✅ Yes |
 | pcarmarket | `scraper.py` | ✅ LIVE | ✅ Yes |
 | Built for Backroads | Distill Desktop (HTML mode) — last remaining Distill source | ✅ LIVE | ✅ Yes |
 
-### Distill Status (April 4)
-Distill Web Monitor is now only used for **Built for Backroads**. All other sources have been migrated to local Playwright/API scrapers. Distill subscription can be cancelled once BfB is migrated (low priority — BfB is low volume, 6 listings).
+### Distill Status (April 8)
+Distill Web Monitor serves **Built for Backroads** and **Cars.com** (private listings only).
+
+**Cars.com on Distill — intentional design:**
+- Distill monitor is pointed at the Cars.com private-seller filtered URL only
+- Private sellers are the target — dealers list on AutoTrader too, so no loss of coverage
+- Cloudflare blocks all scraper strategies on Cars.com (confirmed April 8 — see session log)
+- No per-listing URLs or images from Distill, but year/model/price/mileage flows correctly
+- `scraper_carscom.py` kept in place — re-enable if Cloudflare bypass found
 
 Distill `_SOURCE_MAP` skip flags:
 - `autotrader.com` → `skip=True` (owned by `scraper_autotrader.py`)
-- `cars.com` → `skip=True` (owned by `scraper_carscom.py`)
+- `cars.com` → `skip=False` (Distill — private listings only)
 - `ebay.com` → `skip=True` (owned by `scraper_ebay.py`)
 - `rennlist.com` → `skip=True` (owned by `scraper_rennlist.py`)
-- `builtforbackroads.com` → `skip=False` (still Distill)
+- `builtforbackroads.com` → `skip=False` (Distill)
 
 ### Rennlist Scraper Notes
 - Playwright headless Chromium + DataImpulse proxy
@@ -225,13 +232,14 @@ Fires only when a listing scores as DEAL or WATCH against FMV.
 
 ### Immediate
 1. **Low-price DEAL false positives** — add ⚠️ caveat in alert for LOW confidence + price <$20k
-2. **AutoTrader intermittent zeros** — proxy dead-detection can mark proxy dead on startup if DataImpulse is briefly down, causing direct-IP exposure → Akamai block. Harden startup detection.
+2. **AutoTrader intermittent zeros** — proxy dead-detection can mark proxy dead on startup if DataImpulse is briefly down. Harden startup detection in AutoTrader chat.
 
 ### Short Term
-3. **Cars & Bids active listings** — sold comps exist. Active listings scraper is small additional work. High value for Tier 1/GT.
+3. **Cars & Bids active listings** — sold comps exist. Handoff prompt ready in C&B chat. High value for Tier 1/GT.
 4. **PCA Mart image URLs** — stored as local `/static/img_cache/` paths. Need public URLs for iMessage previews.
 5. **Built for Backroads → Playwright scraper** — last remaining Distill source. Low priority (6 listings) but would allow cancelling Distill subscription entirely.
-6. **classic.com API** — follow up with insight@classic.com
+6. **FMV accuracy audit** — identify which specific cars/generations are producing wrong estimates. Likely thin comp sets or generation bucketing mismatches. Dedicated session needed.
+7. **Dashboard as iOS PWA** — add `manifest.json` + service worker to `docs/`. Installs as app icon from Safari. ~2 hour build, no App Store needed.
 
 ### Phase 4 — Predictive Analysis (needs 30+ days of data)
 7. Weekly/monthly reports gain real predictive value once data accumulates
@@ -243,11 +251,12 @@ Fires only when a listing scores as DEAL or WATCH against FMV.
 
 | Issue | Severity | Status |
 |---|---|---|
-| AutoTrader intermittent zeros | Medium | Proxy startup detection can fail — harden in next AT session |
+| AutoTrader intermittent zeros | Medium | Proxy startup detection can fail — harden in AutoTrader chat |
 | Low-price DEAL false positives | Low | Salvage/flood at $1k–$20k scoring as DEAL. Fix: ⚠️ caveat for LOW conf + price <$20k |
 | PCA Mart images local-only | Low | `/static/img_cache/` paths not accessible externally |
 | Hagerty Excellent prices locked | Low | Requires session token — Good condition only for now |
-| Distill subscription | Low | Only BfB remains on Distill — can cancel once BfB scraper built |
+| Distill subscription | Low | BfB + Cars.com (private) on Distill — keep active |
+| FMV accuracy on thin comp sets | Low | Some cars way off — needs audit of generation bucketing logic |
 
 ---
 
@@ -288,7 +297,29 @@ Fires only when a listing scores as DEAL or WATCH against FMV.
 - `enrich_ebay_mileage.py` built: on-demand eBay mileage/VIN enricher via per-item API
 - Proxy policy hardened: no naked-IP fallback on AutoTrader or Cars.com
 
-### April 4, 2026
+### April 8, 2026 — cars.com health check
+- **Cars.com scraper broken** — Cloudflare upgraded to `cType: 'managed'` challenge between April 4–8
+- Diagnosed: 403 + "Just a moment..." on all endpoints (search URL, mobile UA, API paths, NextJS data)
+- All strategies fail: curl_cffi (all fingerprints), requests, headless Playwright
+- Headless Playwright gets HTTP/2 error through proxy; even with `--disable-http2` the challenge doesn't auto-resolve
+- No unprotected mobile/API endpoint found (unlike AutoTrader's `m.autotrader.com`)
+- **Decision: revert to Distill Desktop for Cars.com** — real browser with cookies solves CF challenge
+- `distill_poller.py` cars.com → `skip=False`; `scraper.py` Cars.com entry commented out
+- `scraper_carscom.py` left in place — re-enable if a Cloudflare bypass solution is found
+- Tradeoff: lose per-listing URLs and images, gain data continuity
+
+### April 8, 2026
+- **iMessage new-listing alerts** — `notify_new_listings(conn, new_ids)` added to `notify_imessage.py`. Every new listing that enters the DB triggers one iMessage immediately, no FMV threshold required. Dedup via `"new:{url}"` keys in `seen_alerts_imessage.json`. Smoke tested — 3 messages confirmed delivered.
+- **Alert order per cycle:** (1) `notify_new_listings()` fires for every new car → (2) `notify_imessage.main()` fires for deal/watch scored listings
+- **`main.py` updated:** `run_snapshot()` now returns `new_ids` list; `main()` passes it to `notify_new_listings()` before deal alerts
+- **Dashboard "Live Feed only" filter removed** — checkbox deleted from sidebar and JS logic stripped. Dashboard always shows all sources on load.
+- **Dashboard 404 links fixed:**
+  - `live_feed.py` OUT_PATH changed from `data/live_feed.html` → `docs/live_feed.html` (now served by GitHub Pages)
+  - `new_dashboard.py` OUT_PATH confirmed as `docs/index.html`
+  - Both sidebar and Market Reports card links updated: `../data/live_feed.html` → `live_feed.html`
+- **`.gitignore` hardened** — added `data/`, `.github_token`, `.claude/`, `docs/img_cache/` to prevent secrets and image cache commits. Fixes the root cause of the 188k auto-committed image files that bloated the repo.
+- **GitHub push resolved** — force pushed clean history to `origin/main`. All dashboard links working on GitHub Pages.
+- **classic.com API** — ruled out permanently. Pricing prohibitive and data largely redundant given current source coverage.
 - **`scraper_rennlist.py` built and wired — Rennlist fully migrated off Distill:**
   - Playwright headless Chromium + DataImpulse proxy
   - Pre-filtered URL: USA only, for-sale, active, vehicles, newest first

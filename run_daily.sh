@@ -24,7 +24,8 @@ cd "$SCRIPT_DIR"
 # Each step runs independently — a failure in one does not abort the others.
 "$PYTHON" main.py >> "$LOG" 2>&1 || echo "=== main.py exited $? ===" >> "$LOG"
 "$PYTHON" enrich_listings.py >> "$LOG" 2>&1 || echo "=== enrich_listings.py exited $? ===" >> "$LOG"
-"$PYTHON" enrich_rennlist.py >> "$LOG" 2>&1 || echo "=== enrich_rennlist.py exited $? ===" >> "$LOG"
+# enrich_rennlist.py disabled — Rennlist now handled by scraper_rennlist.py
+# "$PYTHON" enrich_rennlist.py >> "$LOG" 2>&1 || echo "=== enrich_rennlist.py exited $? ===" >> "$LOG"
 "$PYTHON" notify_gunther.py >> "$LOG" 2>&1 || echo "=== notify_gunther.py exited $? ===" >> "$LOG"
 
 # ── Sold-comp scrape + VIN enrichment + weekly report (every Monday) ────────
