@@ -755,7 +755,7 @@ button{{cursor:pointer;border:none;background:none;font:inherit;color:inherit}}
     <div class="filter-group">
       <label>Type</label>
       <div class="filter-checkboxes">
-        <label><input type="checkbox" id="f-live" checked onchange="applyFilters()"> Live Feed only</label>
+
         <label><input type="checkbox" id="f-deals" onchange="applyFilters()"> Deals only (↓5%+ FMV)</label>
         <label><input type="checkbox" id="f-tier1" onchange="applyFilters()"> GT/Collector only</label>
       </div>
@@ -937,7 +937,7 @@ function applyFilters() {{
   const yearMax  = parseInt(document.getElementById('f-year-max').value) || 9999;
   const priceMin = parseInt(document.getElementById('f-price-min').value) || 0;
   const priceMax = parseInt(document.getElementById('f-price-max').value) || 99999999;
-  const liveOnly = document.getElementById('f-live').checked;
+  // live feed filter removed — all sources shown by default
   const dealsOnly= document.getElementById('f-deals').checked;
   const tier1Only= document.getElementById('f-tier1').checked;
   const q        = document.getElementById('search-box').value.toLowerCase();
@@ -961,7 +961,7 @@ function applyFilters() {{
     if (src      && cardSrc   !== src)            show = false;
     if (cardYear < yearMin || cardYear > yearMax) show = false;
     if (cardPrice > 0 && (cardPrice < priceMin || cardPrice > priceMax)) show = false;
-    if (liveOnly && cardType !== 'auction' && cardFeed !== 'live') show = false;
+    // live feed filter removed
     if (tier1Only&& cardTier  !== 'TIER1')        show = false;
     if (q && !cardText.includes(q))              show = false;
 
@@ -974,7 +974,6 @@ function applyFilters() {{
 function resetFilters() {{
   ['f-gen','f-model','f-source'].forEach(id => document.getElementById(id).value = '');
   ['f-year-min','f-year-max','f-price-min','f-price-max'].forEach(id => document.getElementById(id).value = '');
-  document.getElementById('f-live').checked = false;
   document.getElementById('f-deals').checked = false;
   document.getElementById('f-tier1').checked = false;
   document.getElementById('search-box').value = '';
