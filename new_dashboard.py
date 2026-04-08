@@ -245,7 +245,7 @@ def _card(car: dict, fmv_score: dict) -> str:
     mileage  = car.get("mileage")
     url      = car.get("listing_url", "") or "#"
     img      = car.get("image_url", "") or ""
-    created  = car.get("date_first_seen", "") or car.get("created_at", "")
+    created  = car.get("created_at", "") or car.get("date_first_seen", "")
     location = car.get("location", "") or ""
     trans    = car.get("transmission", "") or ""
     days     = car.get("days_on_site") or 0
@@ -407,7 +407,7 @@ def generate() -> str:
             c["_fmv"] = fmv_by_id.get(c["id"], {"fmv": None, "confidence": "NONE", "comp_count": 0})
 
         # Sort newest first (default view)
-        active_sorted = sorted(active, key=lambda c: c.get("date_first_seen") or "", reverse=True)
+        active_sorted = sorted(active, key=lambda c: c.get("created_at") or c.get("date_first_seen") or "", reverse=True)
 
         # Sold comps — last 24 months
         cutoff = (date.today() - timedelta(days=730)).isoformat()
@@ -444,7 +444,7 @@ def generate() -> str:
 
         # Build auction cards
         auction_cards = "\n".join(_card(c, c["_fmv"]) for c in sorted(
-            auctions, key=lambda c: c.get("date_first_seen") or "", reverse=True))
+            auctions, key=lambda c: c.get("created_at") or c.get("date_first_seen") or "", reverse=True))
 
         # Build comp rows HTML
         comp_rows_html = "\n".join(_comp_row(c) for c in comps)
