@@ -45,6 +45,8 @@ import report as rpt
 import daily_report
 import weekly_report
 import monthly_report
+import notify_imessage
+import health_monitor
 
 
 def write_scrape_summary(results: dict, today: str):
@@ -80,6 +82,7 @@ def run_snapshot(dealer_results: dict, today: str):
         new_total = 0
         updated_total = 0
         sold_total = 0
+        new_ids = []
 
         for dealer_name, cars in dealer_results.items():
             if not cars:
@@ -115,6 +118,7 @@ def run_snapshot(dealer_results: dict, today: str):
                     )
                     if is_new:
                         new_total += 1
+                        new_ids.append(listing_id)
                     elif price_changed:
                         updated_total += 1
                 except Exception as e:
@@ -142,7 +146,7 @@ def run_snapshot(dealer_results: dict, today: str):
             "Snapshot complete — new: %d  price changes: %d  sold: %d",
             new_total, updated_total, sold_total
         )
-    return new_total, updated_total, sold_total
+    return new_total, updated_total, sold_total, new_ids
 
 
 def main():
@@ -235,7 +239,7 @@ def main():
     results = sc.run_all(dealers)
 
     # Persist
-    run_snapshot(results, today)
+    new_total, updated_total, sold_total, new_ids = run_snapshot(results, today)
 
     # Per-source summary → console + data/logs/scrape_YYYY-MM-DD.log
     write_scrape_summary(results, today)
@@ -270,6 +274,26 @@ def main():
             print(f"{label}: file://{p}")
         except Exception as e:
             log.warning("%s failed: %s", label, e)
+
+
+    # iMessage alerts — new listing ping (every new car, no FMV threshold)
+    try:
+        with database.get_conn() as conn:
+            notify_imessage.notify_new_listings(conn, new_ids)
+    except Exception as e:
+        log.warning("iMessage new-listing alerts failed: %s", e)
+
+    # iMessage deal alerts — deal/watch scoring
+    try:
+        notify_imessage.main()
+    except Exception as e:
+        log.warning("iMessage deal alerts failed: %s", e)
+
+    # Health monitor
+    try:
+        health_monitor.main()
+    except Exception as e:
+        log.warning("Health monitor failed: %s", e)
 
 
 if __name__ == "__main__":
