@@ -26,7 +26,7 @@ cd "$SCRIPT_DIR"
 "$PYTHON" enrich_listings.py >> "$LOG" 2>&1 || echo "=== enrich_listings.py exited $? ===" >> "$LOG"
 # enrich_rennlist.py disabled — Rennlist now handled by scraper_rennlist.py
 # "$PYTHON" enrich_rennlist.py >> "$LOG" 2>&1 || echo "=== enrich_rennlist.py exited $? ===" >> "$LOG"
-"$PYTHON" notify_gunther.py >> "$LOG" 2>&1 || echo "=== notify_gunther.py exited $? ===" >> "$LOG"
+# notify_gunther.py removed — Telegram superseded by iMessage (notify_imessage.py)
 
 # ── Sold-comp scrape + VIN enrichment + weekly report (every Monday) ────────
 if [ "$DOW" -eq 1 ]; then

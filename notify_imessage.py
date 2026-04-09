@@ -350,9 +350,16 @@ def main():
 
         flag = ds["deal_flag"]
         conf = ds["confidence"]
+        price = s.get("price")
 
         # Skip if no comp data
         if conf == "NONE":
+            continue
+
+        # Skip suspiciously low prices — almost certainly BaT current bids
+        # on active auctions, not real asking prices, or salvage listings
+        if price and price < 20000:
+            log.debug("Skip low-price listing ($%s) — likely auction bid or salvage", price)
             continue
 
         # Tier-aware alert thresholds (from WATCHLIST.md)
@@ -367,7 +374,6 @@ def main():
             continue
 
         key        = _listing_key(s)
-        price      = s.get("price")
         last_entry = seen.get(key, {})
         last_price = last_entry.get("last_price")
         last_flag  = last_entry.get("last_flag")
