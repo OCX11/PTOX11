@@ -132,6 +132,9 @@ def _parse_title(title: str) -> dict:
             trim = re.sub(r"^\s*[-–—,]\s*", "", after).strip()
             trim = re.split(r"[—–|\$]|\d{1,3}(,\d{3})+\s*mi", trim)[0].strip()
             trim = re.sub(r"\s+\d{4,}(?:\s*mi(?:les?)?)?\s*$", "", trim, flags=re.I).strip()
+            # Cap trim at 60 chars — anything longer is a sentence bleed from title
+            if len(trim) > 60:
+                trim = trim[:60].rsplit(" ", 1)[0].strip()
             if trim:
                 result["trim"] = trim
             break
