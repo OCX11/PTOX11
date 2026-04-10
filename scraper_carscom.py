@@ -160,6 +160,8 @@ def _looks_valid(html):
         "data-listing-id" in html
         or "vehicle-card" in html
         or "listings-page" in html
+        or "fuse-card" in html
+        or "data-vehicle-details" in html
     )
 
 
@@ -420,14 +422,22 @@ def _playwright_available():
 
 
 def _fetch_playwright(url, headless=True):
-    """Fetch a page with Playwright headless. Returns HTML or None."""
+    """
+    Fetch via Playwright. Handles Cloudflare's JS challenge ('Just a moment...')
+    by waiting for the challenge to auto-resolve before reading page content.
+    Cloudflare managed challenges resolve in ~5s in a real Chromium browser.
+    """
     if not _playwright_available():
         log.debug("Playwright not installed")
         return None
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
     kwargs = {
         "headless": headless,
-        "args": ["--disable-blink-features=AutomationControlled"],
+        "args": [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-http2",              # force HTTP/1.1 — proxy rejects HTTP/2
+            "--ignore-certificate-errors",
+        ],
     }
     proxy = _pw_proxy()
     if proxy:
@@ -440,7 +450,7 @@ def _fetch_playwright(url, headless=True):
                 user_agent=(
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/123.0.0.0 Safari/537.36"
+                    "Chrome/131.0.0.0 Safari/537.36"
                 ),
                 locale="en-US",
                 timezone_id="America/Los_Angeles",
@@ -452,18 +462,47 @@ def _fetch_playwright(url, headless=True):
                 Stealth().apply_stealth_sync(page)
             except ImportError:
                 pass
-            page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            for selector in ("[data-listing-id]", ".vehicle-card", ".listings-page"):
+
+            # Navigate — wait for network idle so Cloudflare challenge has time to fire
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+            # If Cloudflare challenge page detected, wait for it to auto-resolve.
+            # The challenge JS runs, submits a token, and redirects to the real page.
+            # Give it up to 30s — typical resolution is 5-8s.
+            cf_challenge = False
+            try:
+                page.wait_for_selector("title", timeout=3000)
+                title = page.title()
+                if "just a moment" in title.lower() or "challenge" in title.lower():
+                    cf_challenge = True
+                    log.info("Playwright: Cloudflare challenge detected — waiting for auto-resolve")
+            except Exception:
+                pass
+
+            if cf_challenge:
+                # Wait for fuse-card to appear (means challenge resolved + page loaded)
                 try:
-                    page.wait_for_selector(selector, timeout=8000)
-                    break
-                except Exception:
-                    continue
-            time.sleep(1.5)
+                    page.wait_for_selector("[data-vehicle-details]", timeout=35000)
+                    log.info("Playwright: Cloudflare challenge resolved")
+                except PWTimeout:
+                    log.info("Playwright: challenge did not resolve within 35s")
+                    browser.close()
+                    return None
+            else:
+                # Normal page — wait for listing data
+                for selector in ("[data-vehicle-details]", "[data-listing-id]", ".vehicle-card"):
+                    try:
+                        page.wait_for_selector(selector, timeout=10000)
+                        break
+                    except Exception:
+                        continue
+
+            time.sleep(1.0)
             html = page.content()
             browser.close()
+
         if _is_blocked(html) or not _looks_valid(html):
-            log.info("Playwright: no valid content at %s", url)
+            log.info("Playwright: no valid content (len=%d)", len(html))
             return None
         return html
     except Exception as e:
@@ -475,7 +514,10 @@ def _fetch_playwright(url, headless=True):
 # curl_cffi — Chrome TLS impersonation (primary strategy, mirrors autotrader)
 # ---------------------------------------------------------------------------
 _CFFI_AVAILABLE = None
-_CFFI_IMPERSONATE = "chrome123"
+# chrome131 is the latest fingerprint in curl_cffi 0.13.x — most realistic
+_CFFI_IMPERSONATE = "chrome131"
+# Fallback targets to try in order if primary is blocked
+_CFFI_FALLBACKS = ["chrome124", "chrome123", "chrome110"]
 
 
 def _curl_cffi_available():
@@ -492,7 +534,7 @@ def _curl_cffi_available():
 def _fetch_curl_cffi(url):
     """
     Fetch via curl_cffi with Chrome TLS impersonation + proxy.
-    Bypasses Cloudflare bot detection. Always routes through DataImpulse proxy.
+    Tries multiple impersonation targets in order until one returns valid content.
     Returns HTML string or None.
     """
     if not _curl_cffi_available():
@@ -502,55 +544,68 @@ def _fetch_curl_cffi(url):
         return None
     from curl_cffi import requests as cr
     proxies = {"http": _PROXY_URL, "https": _PROXY_URL}
-    try:
-        r = cr.get(
-            url,
-            impersonate=_CFFI_IMPERSONATE,
-            timeout=30,
-            proxies=proxies,
-            allow_redirects=True,
-            headers={
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-        )
-        if _is_blocked(r.text):
-            log.info("curl_cffi: block page at %s (len=%d)", url, len(r.text))
-            return None
-        if not _looks_valid(r.text):
-            log.info("curl_cffi: no listing data at %s (len=%d)", url, len(r.text))
-            return None
-        return r.text
-    except Exception as e:
-        log.debug("curl_cffi error: %s", e)
-        return None
+
+    # Realistic Chrome browser headers — matches what a real browser sends to Cars.com
+    headers = {
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"macOS"',
+        "sec-fetch-dest": "document",
+        "sec-fetch-mode": "navigate",
+        "sec-fetch-site": "none",
+        "sec-fetch-user": "?1",
+        "upgrade-insecure-requests": "1",
+    }
+
+    targets = [_CFFI_IMPERSONATE] + _CFFI_FALLBACKS
+    for target in targets:
+        try:
+            r = cr.get(
+                url,
+                impersonate=target,
+                timeout=30,
+                proxies=proxies,
+                allow_redirects=True,
+                headers=headers,
+            )
+            if _is_blocked(r.text):
+                log.info("curl_cffi [%s]: block page (len=%d) — trying next", target, len(r.text))
+                continue
+            if not _looks_valid(r.text):
+                log.info("curl_cffi [%s]: no listing data (len=%d) — trying next", target, len(r.text))
+                continue
+            log.info("curl_cffi [%s]: success (len=%d)", target, len(r.text))
+            return r.text
+        except Exception as e:
+            log.debug("curl_cffi [%s] error: %s", target, e)
+            continue
+    return None
 
 
 def _fetch_page(url):
     """
-    Fetch URL trying strategies in order:
-      1. curl_cffi (Chrome TLS fingerprint — bypasses Cloudflare bot detection)
-      2. requests (fast, may be fingerprint-blocked)
-      3. headless Playwright (full browser fallback)
+    Fetch URL. Cars.com uses Cloudflare managed challenge which requires a real
+    browser to auto-solve. Strategy order:
+      1. curl_cffi (fast path — works if cf_clearance cookie already warm; worth trying)
+      2. Playwright headless (primary — auto-solves Cloudflare JS challenge, waits for redirect)
+    requests is skipped — it cannot solve Cloudflare challenges.
     """
     log.info("Fetching: %s", url)
 
-    # Strategy 1: curl_cffi (Chrome TLS — same trick that works on AutoTrader)
+    # Strategy 1: curl_cffi — fast, worth trying in case Cloudflare lets it through
     if _curl_cffi_available():
         html = _fetch_curl_cffi(url)
         if html:
             log.info("  curl_cffi succeeded (len=%d)", len(html))
             return html
-        log.info("  curl_cffi blocked/failed — trying requests")
+        log.info("  curl_cffi blocked — trying Playwright (Cloudflare challenge resolver)")
 
-    # Strategy 2: requests
-    html = _fetch_requests(url)
-    if html:
-        log.info("  requests succeeded (len=%d)", len(html))
-        return html
-
-    # Strategy 3: headless Playwright
-    log.info("  requests blocked/failed — trying Playwright")
+    # Strategy 2: Playwright — solves Cloudflare JS challenge automatically
     html = _fetch_playwright(url, headless=True)
     if html:
         log.info("  Playwright succeeded (len=%d)", len(html))
@@ -689,8 +744,34 @@ if __name__ == "__main__":
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    # Debug: show raw cards before filtering
+    # Diagnose: dump raw response to see what Cars.com is actually returning
     import sys
+    if "--diagnose" in sys.argv:
+        from curl_cffi import requests as cr
+        test_url = "{}&page_size={}&page=1".format(_SEARCH_BASE, _PAGE_SIZE)
+        proxies = {"http": _PROXY_URL, "https": _PROXY_URL} if _PROXY_URL else {}
+        print("Fetching with curl_cffi ({}) via proxy...".format(_CFFI_IMPERSONATE))
+        try:
+            r = cr.get(test_url, impersonate=_CFFI_IMPERSONATE, timeout=30,
+                       proxies=proxies, allow_redirects=True,
+                       headers={"Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                                "Accept-Language": "en-US,en;q=0.9"})
+            print("Status: {}  Length: {}".format(r.status_code, len(r.text)))
+            print("Content-Type: {}".format(r.headers.get("content-type", "?")))
+            print("URL after redirects: {}".format(r.url))
+            print("\n--- First 3000 chars ---")
+            print(r.text[:3000])
+            print("\n--- Last 500 chars ---")
+            print(r.text[-500:])
+            # Check for key markers
+            for marker in ["data-listing-id", "data-vehicle-details", "fuse-card",
+                           "vehicle-card", "captcha", "cf-ray", "challenge",
+                           "recaptcha", "bot", "blocked"]:
+                print("  '{}' found: {}".format(marker, marker in r.text.lower()))
+        except Exception as e:
+            print("curl_cffi failed: {}".format(e))
+        sys.exit(0)
+
     if "--debug" in sys.argv:
         from curl_cffi import requests as cr
         url = "{}&page_size={}&page=1".format(_SEARCH_BASE, _PAGE_SIZE)
