@@ -5,9 +5,10 @@ Uses the eBay Browse API (OAuth 2.0 Client Credentials) — clean JSON,
 no HTML parsing, no DOM dependency. Returns both Buy It Now (RETAIL)
 and auction listings.
 
-Bootstrap-then-monitor pattern:
-  First run:  up to 10 pages (200 listings, 20/page)
-  Subsequent: 1 page (20 listings) — enough to catch new listings at 12-min interval
+Cache-based pattern (fixes mark_sold() destroying inventory):
+  Full sweep: up to MAX_PAGES_FULL pages every CACHE_TTL_MINUTES (default 60 min).
+  Incremental: page 0 only (newest listings) — merged into cache each other cycle.
+  Every call returns the full cached inventory so mark_sold() never kills active listings.
 
 Proxy: loaded from data/proxy_config.json — optional for eBay API (it's an
 official REST API, not scraping). If proxy load fails, continues without it.
@@ -28,6 +29,12 @@ DEALER_NAME = "eBay Motors"
 
 _STATE_FILE = Path.home() / "porsche-tracker" / "data" / "ebay_state.json"
 _CFG_FILE   = Path.home() / "porsche-tracker" / "data" / "ebay_api_config.json"
+_CACHE_FILE = Path.home() / "porsche-tracker" / "data" / "ebay_cache.json"
+
+# Full inventory refresh once per hour; incremental (page 0 only) every other cycle.
+# This prevents mark_sold() from killing listings that weren't in the latest 20 results.
+_CACHE_TTL_MINUTES = 60
+_MAX_PAGES_FULL    = 50   # 50 × 20 = 1000 slots — covers the full eBay Porsche inventory
 
 _OAUTH_URL  = "https://api.ebay.com/identity/v1/oauth2/token"
 _SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
@@ -39,11 +46,37 @@ _token_cache = {"token": None, "expires_at": 0}
 # ---------------------------------------------------------------------------
 # Import filter from scraper.py
 # ---------------------------------------------------------------------------
+# NOTE: scraper.py imports scraper_ebay.py, creating a circular import.
+# The try/except below catches the ImportError and falls back to return True,
+# meaning the imported _is_valid_listing is effectively a no-op here.
+# Use _local_valid() below for filtering inside scrape_ebay().
+# scraper.py's run_all() will apply the real _is_valid_listing() afterwards.
 try:
     from scraper import _is_valid_listing
 except Exception:
     def _is_valid_listing(car):
         return True
+
+# Allowed base-model substrings — mirrors scraper.py's _ALLOWED_MODELS.
+# Used by _local_valid() to avoid circular-import dependency.
+_ALLOWED_MODEL_TOKENS = frozenset({"911", "cayman", "boxster", "718"})
+
+
+def _local_valid(car):
+    """Lightweight validity check that works without scraper.py's _is_valid_listing().
+    Filters non-target Porsche models and extreme mileage.
+    Year filtering is intentionally left to scraper.py's run_all() pass so that
+    the YEAR_MAX constant there is the single source of truth.
+    """
+    model = (car.get("model") or "").lower()
+    if not model:
+        return False
+    if not any(g in model for g in _ALLOWED_MODEL_TOKENS):
+        return False
+    mileage = car.get("mileage")
+    if mileage is not None and mileage > 100_000:
+        return False
+    return True
 
 # ---------------------------------------------------------------------------
 # Proxy config — optional for eBay API
@@ -152,24 +185,51 @@ def _extract_year(title):
     return int(m.group(1)) if m else None
 
 
-# Model tokens in priority order — longer/more specific first
+# Base models only — must contain one of scraper.py's _ALLOWED_MODELS
+# ("911", "cayman", "boxster", "718") to pass _is_valid_listing().
+# Longer/more-specific tokens first so "718 Cayman" wins over bare "718".
 _MODEL_TOKENS = [
-    "GT3 RS", "GT3", "GT4 RS", "GT4", "GT2 RS", "GT2",
-    "Turbo S", "Turbo",
-    "Speedster", "Spyder", "Sport Classic",
     "718 Cayman", "718 Boxster", "718",
     "Cayman", "Boxster", "911",
 ]
 
+# Variants that imply a base model when no explicit model name appears in the title.
+# e.g. "2019 Porsche GT3 RS" (no "911") → infer "911".
+_VARIANT_TO_MODEL = [
+    (frozenset({"gt3 rs", "gt3", "gt2 rs", "gt2", "turbo s", "turbo",
+                "speedster", "sport classic", "targa"}), "911"),
+    (frozenset({"gt4 rs", "gt4"}), "Cayman"),
+    (frozenset({"spyder"}), "Boxster"),
+]
+
+# Titles that contain these strings are non-target Porsches — reject early
+# so they don't get misclassified via variant inference (e.g. Cayenne Turbo → "911").
+_TITLE_BLOCKED = frozenset({"cayenne", "macan", "panamera", "taycan"})
+
 
 def _extract_model(title):
-    """Scan title for known Porsche model tokens. Returns the first match."""
+    """Return base model (911/Cayman/Boxster/718/718 Cayman/718 Boxster) from title.
+
+    Checks base model tokens first, then falls back to variant inference.
+    Returns None for blocked models (Cayenne/Macan/etc.) and unrecognised titles.
+    """
     if not title:
         return None
     title_lower = title.lower()
+
+    # Reject non-target Porsches before any inference
+    if any(b in title_lower for b in _TITLE_BLOCKED):
+        return None
+
     for token in _MODEL_TOKENS:
         if token.lower() in title_lower:
             return token
+
+    # Infer base model from GT/variant keywords when the base name is absent
+    for variants, base in _VARIANT_TO_MODEL:
+        if any(v in title_lower for v in variants):
+            return base
+
     return None
 
 
@@ -306,7 +366,10 @@ def _search_page(token, page):
     params = {
         "q": "porsche",
         "category_ids": "6001",
-        "filter": "conditionIds:{3000|4000|6000},price:[25000..],priceCurrency:USD",
+        # itemLocationCountry:US — US listings only (geographic filter)
+        "filter": "conditionIds:{3000|4000|6000},price:[25000..],priceCurrency:USD,itemLocationCountry:US",
+        # aspect_filter: restrict to Make=Porsche server-side (eliminates Mercedes etc.)
+        "aspect_filter": "categoryAspects:Make{Porsche}",
         "sort": "newlyListed",
         "limit": "20",
         "offset": str(page * 20),
@@ -344,54 +407,32 @@ def _search_page(token, page):
 
 
 # ---------------------------------------------------------------------------
-# Bootstrap state helpers
+# Full-inventory cache — prevents mark_sold() from killing active listings
 # ---------------------------------------------------------------------------
-def _load_state():
+def _load_cache():
+    """Return {"listings": [...], "ts": <epoch float>} or empty defaults."""
     try:
-        with open(_STATE_FILE) as f:
+        with open(_CACHE_FILE) as f:
             return json.load(f)
     except Exception:
-        return {}
+        return {"listings": [], "ts": 0.0}
 
 
-def _save_state(state):
-    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(_STATE_FILE, "w") as f:
-        json.dump(state, f)
+def _save_cache(listings):
+    _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(_CACHE_FILE, "w") as f:
+        json.dump({"listings": listings, "ts": time.time()}, f)
 
 
 # ---------------------------------------------------------------------------
 # Main public function
 # ---------------------------------------------------------------------------
-def scrape_ebay():
+def _fetch_pages(token, max_pages):
     """
-    Scrape eBay Motors for Porsche listings via the Browse API.
-    Bootstrap run: up to 10 pages (200 listings).
-    Incremental run: 1 page (20 listings).
-    Proxy is used if configured, but not required (official API).
+    Fetch up to max_pages from the eBay Browse API.
+    Returns a list of parsed+validated listing dicts.
+    Stops early once all API results have been retrieved.
     """
-    cfg = _load_api_config()
-    app_id = cfg.get("app_id")
-    cert_id = cfg.get("cert_id")
-    if not app_id or not cert_id:
-        log.error("eBay: missing app_id or cert_id in %s — skipping", _CFG_FILE)
-        return []
-
-    token = _get_token(app_id, cert_id)
-    if not token:
-        log.error("eBay: could not obtain OAuth token — skipping scrape")
-        return []
-
-    state = _load_state()
-    bootstrapped = state.get("bootstrapped", False)
-
-    if bootstrapped:
-        max_pages = 1
-        log.info("eBay: incremental run (1 page, 20 listings)")
-    else:
-        max_pages = 10
-        log.info("eBay: bootstrap run (up to %d pages, 20 listings each)", max_pages)
-
     all_listings = []
     seen_keys = set()
     filtered_out = 0
@@ -410,17 +451,14 @@ def scrape_ebay():
                 if car is None:
                     continue
 
-                # Dedup key: prefer VIN, then URL
-                key = car.get("vin") or car.get("url") or ""
-                if not key:
-                    key = "{}|{}|{}".format(
-                        car.get("year"), car.get("model"), car.get("price")
-                    )
-                if key in seen_keys:
+                key = car.get("vin") or car.get("url") or "{}|{}|{}".format(
+                    car.get("year"), car.get("model"), car.get("price")
+                )
+                if not key or key in seen_keys:
                     continue
                 seen_keys.add(key)
 
-                if not _is_valid_listing(car):
+                if not _local_valid(car):
                     filtered_out += 1
                     continue
 
@@ -430,24 +468,91 @@ def scrape_ebay():
             except Exception as e:
                 log.warning("eBay: skipping bad listing (%s): %s",
                             item.get("itemId", "?"), e)
-                continue
 
-        log.info("eBay page %d: %d new listings (total API results: %d, running total: %d)",
+        log.info("eBay page %d: %d valid listings (API total: %d, running: %d)",
                  page, new_this_page, total, len(all_listings))
 
-        if new_this_page == 0:
+        # Stop once we've consumed all available results
+        if (page + 1) * 20 >= total:
             break
 
         if page < max_pages - 1:
-            time.sleep(0.5)  # light delay between API pages
+            time.sleep(0.5)
 
-    if not bootstrapped and all_listings:
-        _save_state({"bootstrapped": True})
-        log.info("eBay: bootstrap complete — state written to %s", _STATE_FILE)
-
-    log.info("eBay scrape complete: %d listings (%d filtered out)",
-             len(all_listings), filtered_out)
+    log.info("eBay fetch complete: %d listings (%d filtered out)", len(all_listings), filtered_out)
     return all_listings
+
+
+def scrape_ebay():
+    """
+    Scrape eBay Motors for Porsche listings via the Browse API.
+
+    Cache strategy (solves mark_sold() inventory collapse):
+      - Every cycle returns the FULL cached inventory so mark_sold() never
+        falsely kills listings that weren't in the latest 20 API results.
+      - Full sweep (all pages) runs once per hour to refresh the cache.
+      - Incremental run (page 0 only) runs every other cycle and merges new
+        listings into the cache.
+
+    Proxy is used if configured, but not required (official API).
+    """
+    cfg = _load_api_config()
+    app_id = cfg.get("app_id")
+    cert_id = cfg.get("cert_id")
+    if not app_id or not cert_id:
+        log.error("eBay: missing app_id or cert_id in %s — skipping", _CFG_FILE)
+        return []
+
+    token = _get_token(app_id, cert_id)
+    if not token:
+        log.error("eBay: could not obtain OAuth token — skipping scrape")
+        return []
+
+    cache = _load_cache()
+    cache_age_min = (time.time() - cache.get("ts", 0.0)) / 60.0
+    cached_listings = cache.get("listings") or []
+
+    if cached_listings and cache_age_min < _CACHE_TTL_MINUTES:
+        # --- Incremental update ---
+        log.info("eBay: incremental update (cache %.0f min old, %d cached listings)",
+                 cache_age_min, len(cached_listings))
+
+        items, total = _search_page(token, 0)
+        log.info("eBay page 0: fetched %d items (API total: %d)", len(items), total)
+
+        new_count = 0
+        # Merge new/updated listings into cache by URL
+        cached_by_url = {l["url"]: l for l in cached_listings if l.get("url")}
+        for item in items:
+            try:
+                car = _parse_item(item)
+                if car and car.get("url") and _local_valid(car):
+                    if car["url"] not in cached_by_url:
+                        new_count += 1
+                    cached_by_url[car["url"]] = car
+            except Exception as e:
+                log.warning("eBay: parse error (%s): %s", item.get("itemId", "?"), e)
+
+        merged = list(cached_by_url.values())
+        _save_cache(merged)
+        log.info("eBay scrape complete: %d listings (%d new this cycle)", len(merged), new_count)
+        return merged
+
+    else:
+        # --- Full sweep ---
+        log.info("eBay: full sweep (cache %.0f min old — refreshing all pages)", cache_age_min)
+        listings = _fetch_pages(token, _MAX_PAGES_FULL)
+
+        if listings:
+            _save_cache(listings)
+            log.info("eBay: cache updated (%d listings)", len(listings))
+        elif cached_listings:
+            # API returned nothing — preserve cache rather than wiping inventory
+            log.warning("eBay: full sweep returned 0 listings — preserving existing cache (%d)",
+                        len(cached_listings))
+            return cached_listings
+
+        return listings
 
 
 # ---------------------------------------------------------------------------

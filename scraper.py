@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 # (1984 is the first 930 Turbo year we track; pre-1984 are filtered at display)
 # ---------------------------------------------------------------------------
 YEAR_MIN = 1984
-YEAR_MAX = 2024
+YEAR_MAX = 2026
 _ALLOWED_MODELS = frozenset({"911", "cayman", "boxster", "718"})
 _BLOCKED_MODELS  = frozenset({"cayenne", "macan", "panamera", "taycan", "918"})
 _JUNK_KEYWORDS   = frozenset({
@@ -2683,7 +2683,9 @@ DEALERS = [
 
     # ── Retail scrapers (local Playwright/API) ─────────────────────────────
     {"name": "AutoTrader",                  "scrape": _scrape_autotrader_new},
-    {"name": "Cars.com",                    "scrape": _scrape_carscom_new},
+    # DISABLED — Cars.com: Cloudflare managed challenge blocks all scraper strategies (April 8 2026).
+    #   Reverted to Distill Desktop monitor (distill_poller.py skip=False). Re-enable if bypass found.
+    # {"name": "Cars.com",                    "scrape": _scrape_carscom_new},
     {"name": "eBay Motors",                 "scrape": _scrape_ebay_new},
     {"name": "Rennlist",                    "scrape": _scrape_rennlist_new},
 
