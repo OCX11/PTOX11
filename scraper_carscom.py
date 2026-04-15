@@ -516,8 +516,10 @@ def _fetch_playwright(url, headless=True):
 _CFFI_AVAILABLE = None
 # chrome131 is the latest fingerprint in curl_cffi 0.13.x — most realistic
 _CFFI_IMPERSONATE = "chrome131"
-# Fallback targets to try in order if primary is blocked
-_CFFI_FALLBACKS = ["chrome124", "chrome123", "chrome110"]
+# How many times to retry with a fresh rotating proxy IP before giving up.
+# DataImpulse rotating residential: ~13% of IPs pass CF managed challenge,
+# so 20 retries gives ~94% success probability per page.
+_CFFI_MAX_RETRIES = 20
 
 
 def _curl_cffi_available():
@@ -533,8 +535,12 @@ def _curl_cffi_available():
 
 def _fetch_curl_cffi(url):
     """
-    Fetch via curl_cffi with Chrome TLS impersonation + proxy.
-    Tries multiple impersonation targets in order until one returns valid content.
+    Fetch via curl_cffi with Chrome TLS impersonation + DataImpulse rotating proxy.
+
+    Cars.com uses Cloudflare managed challenge. ~87% of DataImpulse IPs are blocked
+    by CF; ~13% pass through cleanly. Each request uses a NEW proxy IP (rotating).
+    We retry up to _CFFI_MAX_RETRIES times — statistically this gives ~94% success
+    without needing Playwright or any CF-solve service.
     Returns HTML string or None.
     """
     if not _curl_cffi_available():
@@ -545,7 +551,6 @@ def _fetch_curl_cffi(url):
     from curl_cffi import requests as cr
     proxies = {"http": _PROXY_URL, "https": _PROXY_URL}
 
-    # Realistic Chrome browser headers — matches what a real browser sends to Cars.com
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -562,54 +567,48 @@ def _fetch_curl_cffi(url):
         "upgrade-insecure-requests": "1",
     }
 
-    targets = [_CFFI_IMPERSONATE] + _CFFI_FALLBACKS
-    for target in targets:
+    blocked = 0
+    for attempt in range(1, _CFFI_MAX_RETRIES + 1):
         try:
             r = cr.get(
                 url,
-                impersonate=target,
-                timeout=30,
+                impersonate=_CFFI_IMPERSONATE,
+                timeout=20,
                 proxies=proxies,
                 allow_redirects=True,
                 headers=headers,
             )
-            if _is_blocked(r.text):
-                log.info("curl_cffi [%s]: block page (len=%d) — trying next", target, len(r.text))
+            if _is_blocked(r.text) or not _looks_valid(r.text):
+                blocked += 1
+                if attempt % 5 == 0:
+                    log.info("curl_cffi: %d/%d attempts blocked so far, retrying...", blocked, attempt)
+                time.sleep(0.3)
                 continue
-            if not _looks_valid(r.text):
-                log.info("curl_cffi [%s]: no listing data (len=%d) — trying next", target, len(r.text))
-                continue
-            log.info("curl_cffi [%s]: success (len=%d)", target, len(r.text))
+            log.info("curl_cffi: success on attempt %d/%d (len=%d)", attempt, _CFFI_MAX_RETRIES, len(r.text))
             return r.text
         except Exception as e:
-            log.debug("curl_cffi [%s] error: %s", target, e)
+            log.debug("curl_cffi attempt %d error: %s", attempt, e)
+            blocked += 1
+            time.sleep(0.3)
             continue
+
+    log.warning("curl_cffi: all %d attempts blocked/failed", _CFFI_MAX_RETRIES)
     return None
 
 
 def _fetch_page(url):
     """
-    Fetch URL. Cars.com uses Cloudflare managed challenge which requires a real
-    browser to auto-solve. Strategy order:
-      1. curl_cffi (fast path — works if cf_clearance cookie already warm; worth trying)
-      2. Playwright headless (primary — auto-solves Cloudflare JS challenge, waits for redirect)
-    requests is skipped — it cannot solve Cloudflare challenges.
+    Fetch URL via curl_cffi with rotating proxy retry.
+    Cars.com's Cloudflare managed challenge blocks ~87% of DataImpulse IPs;
+    retrying with fresh IPs is the only reliable bypass strategy — Playwright
+    never resolves CF managed challenges through this proxy.
     """
     log.info("Fetching: %s", url)
 
-    # Strategy 1: curl_cffi — fast, worth trying in case Cloudflare lets it through
     if _curl_cffi_available():
         html = _fetch_curl_cffi(url)
         if html:
-            log.info("  curl_cffi succeeded (len=%d)", len(html))
             return html
-        log.info("  curl_cffi blocked — trying Playwright (Cloudflare challenge resolver)")
-
-    # Strategy 2: Playwright — solves Cloudflare JS challenge automatically
-    html = _fetch_playwright(url, headless=True)
-    if html:
-        log.info("  Playwright succeeded (len=%d)", len(html))
-        return html
 
     log.warning("  All fetch strategies failed for %s", url)
     return None

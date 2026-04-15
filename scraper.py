@@ -1317,7 +1317,9 @@ def scrape_bat():
 
 def scrape_pcamart():
     """mart.pca.org — ColdFusion platform, Playwright required.
-    POST /search/ returns column-oriented JSON. Paginate through all pages."""
+    POST /search/ returns column-oriented JSON. Paginate through all pages.
+    Images live at /includes/images/martAdImages/{adnum}/{imgname}.jpg and
+    require an authenticated session; login via pca.org before downloading."""
     if not _playwright_available():
         log.warning("PCA Mart scraper requires Playwright")
         return []
@@ -1359,9 +1361,8 @@ def scrape_pcamart():
             adnum = row.get("ADNUMBER")
             url = f"{BASE}/ads/{adnum}" if adnum else ""
             img_name = _clean(row.get("MAINIMAGENAME"))
-            remote_img = f"{BASE}/includes/images/ads/{img_name}.jpg" if img_name else None
-            # PCA Mart hotlink-protects images — cache locally
-            image_url = _cache_image(remote_img, referer=BASE) if remote_img else None
+            # Actual image path: /includes/images/martAdImages/{adnum}/{imgname}.jpg
+            image_url = f"{BASE}/includes/images/martAdImages/{adnum}/{img_name}.jpg" if (img_name and adnum) else None
             if not year:
                 continue
             c = dict(year=year, make=make, model=model, trim=trim,
@@ -1386,6 +1387,23 @@ def scrape_pcamart():
                         pass
 
             pg.on("response", on_response)
+
+            # Login via pca.org to get an authenticated session for image downloads.
+            # Images at /includes/images/martAdImages/ require auth; the /search/ API
+            # is public but images redirect to pca.org homepage without a valid session.
+            _pca_cfg_path = Path(__file__).parent / "data" / "pca_config.json"
+            try:
+                _cfg = json.loads(_pca_cfg_path.read_text())
+                pg.goto("https://www.pca.org/login/mart/ads",
+                        wait_until="domcontentloaded", timeout=30000)
+                pg.get_by_role("textbox", name="Enter email").fill(_cfg["username"])
+                pg.get_by_role("textbox", name="Password").fill(_cfg["password"])
+                pg.get_by_role("button", name="Login").click()
+                pg.wait_for_load_state("networkidle", timeout=20000)
+                log.debug("PCA Mart: logged in, now at %s", pg.url)
+            except Exception as _le:
+                log.debug("PCA Mart: login step failed (%s), continuing unauthenticated", _le)
+
             pg.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=30000)
             # Give the /search/ XHR up to 8 extra seconds to complete after DOM loads
             try:
@@ -1461,8 +1479,8 @@ def scrape_pcamart():
                         log.warning("PCA Mart page %d error: %s", pg_num, e)
                         break
 
-            # Download images via the existing page context (shares session cookies).
-            # PCA Mart hotlink-protects images — external requests get redirected to homepage.
+            # Download images via the authenticated page context.
+            # Requires login above — images redirect to pca.org without a valid session.
             import hashlib as _hl
             _IMG_CACHE_DIR.mkdir(parents=True, exist_ok=True)
             cached_count = 0
@@ -1477,17 +1495,16 @@ def scrape_pcamart():
                     fname = _hl.md5(img.encode()).hexdigest() + "." + ext
                     fpath = _IMG_CACHE_DIR / fname
                     if not fpath.exists():
-                        # pg.context.request shares the same cookies as the scraped page
                         resp = pg.context.request.get(
                             img,
-                            headers={"Referer": "https://mart.pca.org/"},
+                            headers={"Referer": BASE + "/"},
+                            timeout=20000,
                         )
                         body = resp.body()
-                        content_type = resp.headers.get("content-type", "")
-                        is_image = "image/" in content_type
-                        log.debug("PCA img %s → %d bytes status=%s ct=%s", fname, len(body), resp.status, content_type)
-                        if resp.ok and len(body) > 5000 and is_image:
+                        ct = resp.headers.get("content-type", "")
+                        if resp.ok and "image/" in ct and len(body) > 5000:
                             fpath.write_bytes(body)
+                            log.debug("PCA img cached %s (%d bytes)", fname, len(body))
                     if fpath.exists():
                         car["image_url"] = f"/static/img_cache/{fname}"
                         cached_count += 1
@@ -2691,9 +2708,7 @@ DEALERS = [
 
     # ── Retail scrapers (local Playwright/API) ─────────────────────────────
     {"name": "AutoTrader",                  "scrape": _scrape_autotrader_new},
-    # DISABLED — Cars.com: Cloudflare managed challenge blocks all scraper strategies (April 8 2026).
-    #   Reverted to Distill Desktop monitor (distill_poller.py skip=False). Re-enable if bypass found.
-    # {"name": "Cars.com",                    "scrape": _scrape_carscom_new},
+    {"name": "cars.com",                    "scrape": _scrape_carscom_new},
     {"name": "eBay Motors",                 "scrape": _scrape_ebay_new},
     {"name": "Rennlist",                    "scrape": _scrape_rennlist_new},
 
