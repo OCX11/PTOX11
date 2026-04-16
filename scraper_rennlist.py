@@ -2,8 +2,8 @@
 Standalone Rennlist Classifieds scraper for Porsche listings.
 
 Fetches page 1 of the Rennlist vehicle classifieds (pre-filtered: USA only,
-for-sale, active, vehicles, newest first) using Playwright headless Chromium
-+ DataImpulse proxy.  Parses .shelf-item elements with BeautifulSoup — logic
+for-sale, active, vehicles, newest first) using curl_cffi with Chrome TLS
+fingerprint — bypasses Cloudflare without Playwright or a proxy.  Parses .shelf-item elements with BeautifulSoup — logic
 ported directly from distill_poller.py's rennlist HTML branch.
 
 Returns a list of {year, make, model, trim, mileage, price, vin, url, image_url} dicts.
@@ -200,59 +200,19 @@ def _best_title_line(block: str) -> str:
 # ---------------------------------------------------------------------------
 def _fetch_page(url: str):
     """
-    Fetch URL with Playwright headless Chromium + DataImpulse proxy.
-    Applies playwright-stealth if available.
+    Fetch URL with curl_cffi (Chrome TLS fingerprint) — bypasses Cloudflare
+    challenge pages that block Playwright/requests.  No proxy needed.
     Returns HTML string or None on failure.
     """
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        log.error("Playwright not installed — cannot scrape Rennlist")
+        import curl_cffi.requests as cffi
+        r = cffi.get(url, impersonate="chrome", timeout=30)
+        if r.status_code == 200:
+            return r.text
+        log.warning("Rennlist: HTTP %s for %s", r.status_code, url)
         return None
-
-    proxy = _pw_proxy()
-    launch_kwargs = {
-        "headless": True,
-        "args": ["--disable-blink-features=AutomationControlled"],
-    }
-    if proxy:
-        launch_kwargs["proxy"] = proxy
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(**launch_kwargs)
-            ctx = browser.new_context(
-                viewport={"width": 1280, "height": 900},
-                user_agent=(
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/123.0.0.0 Safari/537.36"
-                ),
-                locale="en-US",
-                timezone_id="America/Los_Angeles",
-                extra_http_headers={"Accept-Language": "en-US,en;q=0.9"},
-            )
-            page = ctx.new_page()
-
-            try:
-                from playwright_stealth import Stealth
-                Stealth().apply_stealth_sync(page)
-            except ImportError:
-                pass
-
-            page.goto(url, wait_until="domcontentloaded", timeout=45000)
-
-            try:
-                page.wait_for_selector(".shelf-item", timeout=10000)
-            except Exception:
-                pass
-
-            html = page.content()
-            browser.close()
-
-        return html
     except Exception as e:
-        log.warning("Playwright fetch failed: %s", e)
+        log.warning("Rennlist: curl_cffi fetch failed: %s", e)
         return None
 
 
