@@ -172,13 +172,21 @@ def scrape_bat_sold(max_pages=50):
                     continue
 
                 sold_text = item.get("sold_text") or ""
-                # sold_text: "Sold for USD $63,333 <span> on 4/15/2026 </span>"
+                # Distinguish actual sales from reserve-not-met (high bid only)
+                # "Sold for USD $63,333" = actual sale
+                # "Bid to USD $48,000"   = reserve not met, high bid only
+                is_rnm = sold_text.strip().lower().startswith("bid to")
                 sold_price = None
                 pm = re.search(r'\$([\d,]+)', sold_text)
                 if pm:
-                    sold_price = _int(pm.group(1).replace(',', ''))
-                # Fallback to current_bid
-                if not sold_price:
+                    amount = _int(pm.group(1).replace(',', ''))
+                    if is_rnm:
+                        # Store high bid separately; sold_price stays NULL
+                        pass
+                    else:
+                        sold_price = amount
+                # Fallback to current_bid only for actual sales
+                if not sold_price and not is_rnm:
                     sold_price = _int(str(item.get("current_bid") or ""))
 
                 # Extract date from sold_text
