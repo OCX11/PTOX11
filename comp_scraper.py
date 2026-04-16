@@ -165,7 +165,13 @@ def scrape_bat_sold(max_pages=50):
                     continue  # skip but don't stop — page may have newer items too
 
                 title = _clean(item.get("title") or "")
-                # Strip leading mileage prefix e.g. "49k-Mile 2012 Porsche..."
+                # Extract mileage BEFORE stripping the prefix
+                mileage = None
+                mm = re.search(r'([\d,]+)(k)?-Mile', title, re.I)
+                if mm:
+                    v = int(mm.group(1).replace(',', ''))
+                    mileage = v * 1000 if mm.group(2) else v
+                # Strip leading mileage prefix for year/model parsing
                 title = re.sub(r'^[\d,]+k?-Mile\s+', '', title, flags=re.I)
                 year, make, model, trim = _parse_ymmt(title)
                 if not year or year < 1950:  # comp scraper allows all Porsche eras
@@ -198,12 +204,6 @@ def scrape_bat_sold(max_pages=50):
                         sold_date = _dt.strptime(dm.group(1), '%m/%d/%Y').strftime('%Y-%m-%d')
                     except Exception:
                         pass
-
-                mileage = None
-                mm = re.search(r"([\d,]+)(k)?-Mile", title, re.I)
-                if mm:
-                    v = int(mm.group(1).replace(",", ""))
-                    mileage = v * 1000 if mm.group(2) else v
 
                 image_url = item.get("thumbnail_url") or None
 
