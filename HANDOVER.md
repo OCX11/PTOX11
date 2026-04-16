@@ -1,11 +1,11 @@
 # Vehicle Market Analyzer — Project Handover Summary
-*Last updated: April 16, 2026 (auction countdown, Rennlist 403, iMessage cleanup)*
+*Last updated: April 16, 2026 (CDN image URLs, generation fill, price-drop alerts)*
 
 ---
 
 ## 1. Project Overview & Goals
 
-A Porsche-focused market intelligence platform running autonomously on a Mac Mini M4. Scrapes 9 active sources (ALL LOCAL — Distill cancelled April 15), tracks price history, scores every listing against FMV using 5,770+ BaT/C&B sold comps, and sends iMessage alerts the moment a new listing hits the DB. Long-term goal: become the most informed buyer in the air-cooled, water-cooled, and GT Porsche market.
+A Porsche-focused market intelligence platform running autonomously on a Mac Mini M4. Scrapes 9 active sources (ALL LOCAL — Distill cancelled April 15), tracks price history, scores every listing against FMV using 6,004 BaT sold comps, and sends iMessage alerts the moment a new listing hits the DB. Long-term goal: become the most informed buyer in the air-cooled, water-cooled, and GT Porsche market.
 
 ### Business Context
 Owner operates a small, focused performance car dealership. All purchases are investments — short-term flips or long-term holds. Core price range: $70K–$150K. GT/collector cars have no ceiling.
@@ -50,10 +50,11 @@ Owner operates a small, focused performance car dealership. All purchases are in
 ~/porsche-tracker/
 ├── scraper.py              # BaT, PCA Mart, pcarmarket scrapers + DEALERS list
 ├── scraper_autotrader.py   # AutoTrader Playwright (mobile site) ✅ LIVE
-├── scraper_carscom.py      # Cars.com curl_cffi — PARKED (Cloudflare block)
+├── scraper_carscom.py      # Cars.com curl_cffi — per-model slug, VIN-stop ✅ LIVE
 ├── scraper_ebay.py         # eBay Browse API (OAuth2) ✅ LIVE
-├── scraper_rennlist.py     # Rennlist Playwright — BROKEN (403 block)
-├── distill_poller.py       # Polls Distill → Built for Backroads only
+├── scraper_rennlist.py     # Rennlist curl_cffi Chrome impersonation ✅ LIVE
+├── scraper_cnb.py          # Cars & Bids Playwright ✅ LIVE
+├── scraper_bfb.py          # Built for Backroads Playwright ✅ LIVE
 ├── db.py                   # DB layer, tier classification, upsert logic
 ├── main.py                 # Entry point — scrape + snapshot + dashboards + alerts
 ├── fmv.py                  # FMV engine — weighted median, generation bucketing
@@ -62,9 +63,11 @@ Owner operates a small, focused performance car dealership. All purchases are in
 ├── git_push_dashboard.sh   # Auto-pushes docs/ to GitHub Pages every 2 min
 ├── run_daily.sh            # Launched by launchd every 12 min
 ├── live_feed.py            # Live feed → docs/live_feed.html
-├── comp_scraper.py         # Ongoing BaT sold comp scraping
+├── comp_scraper.py         # Ongoing BaT sold comp scraping (daily auto-run)
 ├── enrich_bat_vins.py      # BaT VIN/mileage enricher (run overnight)
 ├── enrich_ebay_mileage.py  # eBay per-item mileage enricher (run on-demand)
+├── decode_vin_generation.py # VIN → generation decoder (resumable, run on-demand)
+├── archive_capture.py      # HTML + screenshot archive every 10 min (useful, keep)
 └── data/
     ├── inventory.db              # SQLite — listings, price_history, sold_comps
     ├── imessage_config.json      # {"recipient": "6108361111"} ✅
@@ -78,10 +81,10 @@ Owner operates a small, focused performance car dealership. All purchases are in
 |---|---|---|---|
 | com.porschetracker.scrape | run_daily.sh | 720s (12 min) | ✅ Running |
 | com.porschetracker.gitpush | git_push_dashboard.sh | 120s (2 min) | ✅ Running |
-| com.porschetracker.distill-poller | distill_poller.py | KeepAlive | ✅ Running |
-| com.porschetracker.distill-watcher | distill_watcher.py | KeepAlive | ✅ Running |
-| com.porschetracker.distill-receiver | distill_receiver.py | KeepAlive | ✅ Running |
-| com.porschetracker.archive-capture | archive_capture.py | 600s (10 min) | ❓ Undocumented |
+| com.porschetracker.archive-capture | archive_capture.py | 600s (10 min) | ✅ Running |
+
+Note: All Distill launchd jobs (distill-poller, distill-watcher, distill-receiver) are
+**cancelled** as of April 15, 2026. Zero cloud dependency.
 
 ---
 
@@ -89,30 +92,33 @@ Owner operates a small, focused performance car dealership. All purchases are in
 
 | Source | Method | Status | Listings | Images |
 |---|---|---|---|---|
-| PCA Mart | `scraper.py` cookie-auth | ✅ Working | ~72 | ❌ Local paths |
+| cars.com | `scraper_carscom.py` curl_cffi | ✅ Working | ~733 | ❌ No |
+| eBay Motors | `scraper_ebay.py` Browse API | ✅ Working | ~82 | ✅ Yes |
+| PCA Mart | `scraper.py` Playwright cookie-auth | ✅ Working | ~55 | ✅ CDN URL |
 | Bring a Trailer | `scraper.py` Playwright | ✅ Working | ~40 | ✅ Yes |
-| cars.com | Distill Desktop | ✅ Working | ~18 | ❌ No |
-| AutoTrader | `scraper_autotrader.py` | ⚠️ Intermittent | ~9 | Via link preview |
-| pcarmarket | `scraper.py` | ✅ Working | ~9 | ✅ Yes |
-| Built for Backroads | Distill Desktop | ✅ Working | ~9 | ✅ Yes |
-| eBay Motors | `scraper_ebay.py` Browse API | ⚠️ Degraded | ~7 | ✅ Yes |
-| Rennlist | `scraper_rennlist.py` | ❌ BROKEN | 11 stale | ✅ Yes |
+| Cars & Bids | `scraper_cnb.py` Playwright | ✅ Working | ~12 | ✅ Yes |
+| Built for Backroads | `scraper_bfb.py` Playwright | ✅ Working | ~10 | ✅ Yes |
+| AutoTrader | `scraper_autotrader.py` Playwright | ⚠️ Intermittent | ~10 | Via link |
+| pcarmarket | `scraper.py` Playwright | ✅ Working | ~8 | ✅ Yes |
+| Rennlist | `scraper_rennlist.py` curl_cffi | ✅ Working | ~6 | ✅ Yes |
 
-**Total active: ~179 listings (was ~350+ at peak — Rennlist + eBay degradation)**
+**Total active: ~956 listings across 9 sources**
 
 ### Source Notes
-- **Rennlist:** Returns 0 on every run — 403 block on proxy+Playwright. Existing 11 listings are stale/stuck. Fix needed urgently (high-value private seller source).
-- **eBay Motors:** Collapsed from 81–293 listings at launch to ~7 active. No explicit errors — likely OAuth token or query issue. Investigate.
-- **AutoTrader:** Zeros out ~50% of cycles (Akamai mobile site). Known issue. Dedicated chat for fixes.
-- **cars.com (scraper_carscom.py):** Intentionally parked — Cloudflare blocked. Distill feeds it instead.
-- **Cars.com (capitalized):** Legacy duplicate dealer name — archived April 9. Now all under `cars.com`.
+- **cars.com:** Per-model slug approach (911/boxster/cayman/718_boxster/718_cayman). Direct
+  curl_cffi, no proxy (proxy made CF blocking worse). Incremental mode: VIN-based stop +
+  3-page cap per slug.
+- **PCA Mart:** Images now store both local `/static/img_cache/` path (for dashboard) and
+  original CDN URL in `image_url_cdn` column (for iMessage thumbnails).
+- **AutoTrader:** Zeros out ~50% of cycles (Akamai mobile site block). Known issue.
+- **Rennlist:** Fixed April 16 with curl_cffi Chrome impersonation (was 403 Playwright block).
 
 ### Proxy
 DataImpulse rotating residential (`gw.dataimpulse.com:823`).
 - Username: 7dffcde9c33e2eab45cb
 - Password: 068a3aeba25658b5
 - Balance: ~$50 topped up April 1 (~16 months runway)
-- **Policy: mandatory, no bare-IP fallback** on AutoTrader/Cars.com scrapers
+- **Policy: mandatory on AutoTrader only** — cars.com works better without proxy
 
 ---
 
@@ -120,11 +126,16 @@ DataImpulse rotating residential (`gw.dataimpulse.com:823`).
 
 | Table | Count | Notes |
 |---|---|---|
-| listings (active) | ~179 | Down from ~350 peak |
-| listings (sold/archived) | ~1,200+ | Historical |
-| sold_comps | 5,710 | Growing — FMV truth layer |
+| listings (active) | ~956 | 9 sources |
+| listings (sold/archived) | ~1,800+ | Historical |
+| sold_comps | 6,004 | BaT primary source — current through April 15 |
 | bat_reserve_not_met | 1,784 | Price floor signal |
 | hagerty_valuations | 22 | Good condition only |
+
+### Key Columns (listings table)
+- `auction_ends_at` — ISO UTC end time for BaT and C&B auctions
+- `image_url` — local `/static/img_cache/HASH.jpg` for dashboard rendering
+- `image_url_cdn` — original CDN URL (PCA Mart); used for iMessage thumbnails
 
 ---
 
@@ -135,6 +146,14 @@ DataImpulse rotating residential (`gw.dataimpulse.com:823`).
 - Groups by: generation + trim family
 - Recency decay: full weight ≤6 months, decays to 0.3 at 24 months
 - Outputs: weighted median, price_low/high, RNM floor, confidence, comp count
+- Confidence breakdown: 78% HIGH, 22% MEDIUM, <1% LOW
+
+### VIN Generation Decoder
+`decode_vin_generation.py` — decodes VIN position 10 → model year → generation.
+- Resumable: skips rows where generation is already set
+- Run on-demand after bulk comp imports
+- Last run: April 16, 2026 — 4,006 decoded, 1,314 unknown (no VIN or unrecognized)
+- NULL generation: ~15% (933/6,004) — expected for pre-VIN-standard and non-standard VINs
 
 ---
 
@@ -143,7 +162,7 @@ DataImpulse rotating residential (`gw.dataimpulse.com:823`).
 **File:** `notify_imessage.py`
 **Recipient:** 6108361111
 
-### Two-layer alert system (order each cycle):
+### Three-layer alert system (order each cycle):
 1. **`notify_new_listings(conn, new_ids)`** — fires for EVERY new listing the moment it hits DB. No FMV required. Format:
 ```
 🆕 NEW: 2019 Porsche 911 GT3 RS
@@ -153,7 +172,16 @@ DataImpulse rotating residential (`gw.dataimpulse.com:823`).
 🔗 https://bringatrailer.com/listing/...
 ```
 
-2. **`notify_imessage.main()`** — deal/watch scoring alerts. Format:
+2. **`notify_price_drops(conn)`** — fires when any active listing drops price ≥$500 in last 90 min. Format:
+```
+📉 PRICE DROP: 2022 Porsche 911 GT3
+💰 $229,900 (was $249,900, -8%)
+🛣️  12,000 mi
+📍 AutoTrader  [GT/Collector]
+🔗 https://...
+```
+
+3. **`notify_imessage.main()`** — deal/watch scoring alerts. Format:
 ```
 🔥 DEAL: 2022 Porsche 911 GT3
 💰 $239,900  -15% vs FMV ($282,000)
@@ -166,44 +194,41 @@ DataImpulse rotating residential (`gw.dataimpulse.com:823`).
 - Tier 1: alert on DEAL (10%+ below) OR WATCH (5–10% below)
 - Tier 2: alert only on DEAL (10%+ below)
 - Price floor: listings under $20,000 skipped (auction bids / salvage)
+- Price drop minimum: $500
 - Confidence gate: NONE confidence skipped
-- Dedup: `seen_alerts_imessage.json` — new-listing key `"new:{url}"`, deal key `"{url}"`
+- Dedup: `seen_alerts_imessage.json` — new-listing key `"new:{url}"`, deal key `"{url}"`, drop key `"drop:{id}:{price}"`
+- Images: PCA Mart uses `image_url_cdn` (CDN URL); all others use `image_url` directly
 
 ---
 
 ## 8. Dashboard — GitHub Pages ✅
 
-URL: https://ocx11.github.io/porsche-tracker/
+URL: https://ocx11.github.io/PTOX11/
+GitHub repo: https://github.com/OCX11/PTOX11
 - Auto-regenerated every scrape cycle by `new_dashboard.py` → `docs/index.html`
 - Auto-pushed to GitHub every 2 minutes by `git_push_dashboard.sh`
 - Filters: Generation, Model, Year, Price, Source, Deals only, GT/Collector only
 - No pre-checked filters on load ✅
 - Listing age shows accurate timestamps (uses `created_at`, not `date_first_seen`) ✅
 - All report links working ✅
+- Auction countdown timers live (BaT + C&B) — JS updates every 1 second
+- Searchable listing history: `docs/search.html` — 2,747+ listings, VIN/model/trim/source/price/miles/status
+- PWA installed on iPhone via Safari (manifest.json + sw.js)
 
 ---
 
 ## 9. Open Issues & Next Steps
 
 ### 🔴 Fix Now
-1. **Rennlist scraper broken** — 403 on every run. Proxy+Playwright being blocked. Fix in Rennlist chat. High value source — private sellers, GT/air-cooled.
-2. **eBay Motors collapsed** — ~7 listings vs 200+ at launch. Investigate OAuth/query in eBay chat.
-3. **AutoTrader zeros ~50% of runs** — Akamai block on mobile URL. Fix in AutoTrader chat.
+1. **AutoTrader zeros ~50% of runs** — Akamai block on mobile URL. Fix in AutoTrader chat.
 
 ### 🟡 Short Term
-4. **Cars & Bids active listings** — handoff prompt ready in C&B chat. High Tier 1 value.
-5. **Built for Backroads → Playwright** — last Distill dependency. Cancel Distill sub after.
-6. **PCA Mart image URLs** — local `/static/img_cache/` paths don't send via iMessage.
-7. **archive-capture daemon** — undocumented, runs every 10 min. Audit what it does.
-8. **Legacy dashboard** — `dashboard.py` still generating `static/dashboard.html` every cycle. Dead output. Remove from `main.py`.
+2. **FMV accuracy audit** — some cars way off. Likely generation bucketing edge cases.
+3. **eBay sold comps** — eBay Finding API gives sold listings. Gold for air-cooled FMV.
+4. **PWA / offline support** — service worker currently cache-first. Consider network-first for live data.
 
 ### 🟢 Medium Term
-9. **FMV accuracy audit** — some cars way off. Likely generation bucketing issues.
-10. **PWA / iOS app** — add `manifest.json` to `docs/`. 2-hour build, installs from Safari.
-11. **eBay sold comps** — eBay Finding API gives sold listings. Gold for air-cooled FMV.
-
-### 🔵 Phase 4 (needs 30+ days data)
-12. Price trend prediction, velocity signals, seasonality, buy/sell score
+5. **Price trend prediction** — velocity signals, seasonality, buy/sell score (needs 30+ days data)
 
 ---
 
@@ -211,12 +236,8 @@ URL: https://ocx11.github.io/porsche-tracker/
 
 | Issue | Severity | Status |
 |---|---|---|
-| Rennlist 403 block | ✅ Fixed | curl_cffi Chrome impersonation — April 16 |
-| eBay Motors collapse (200→7) | High | Investigate OAuth/query |
 | AutoTrader ~50% zero cycles | Medium | Known — Akamai mobile block |
-| PCA Mart images local-only | Low | `/static/img_cache/` not public |
-| archive-capture undocumented | Low | Needs audit |
-| Legacy dashboard.py still running | Low | Dead output, remove from main.py |
+| sold_comps NULL generation (15%) | Low | No VIN or pre-standard VINs — expected |
 
 ---
 
@@ -250,59 +271,56 @@ URL: https://ocx11.github.io/porsche-tracker/
 - Listing age display fixed (created_at vs date_first_seen)
 - Independent dealers disabled from DEALERS list
 - iMessage alert wiring restored in main.py after git restore wipe
-
-- **pcarmarket prices** — extracted via `span.pcar-auction-info__price` selector. Was hardcoded None. 4/5 active listings now have prices. `$0` = auction started, no bids yet (valid).
-- **Comp mileage fix** — was stripping `49k-Mile` prefix BEFORE extracting mileage. Now extracts mileage first, then strips. 24 air-cooled comps backfilled via `enrich_bat_vins.py` visiting listing pages. 96% of 911/Cayman/Boxster comps have mileage.
-- **PM thread note** — this PM chat is very long. Start a fresh thread when tool call limits become frequent. Bootstrap new thread with HANDOVER.md content.
-
-### April 16, 2026 — cars.com scraper fix (3 → 839 listings)
-- Root cause: broad URL with models[]= empty returned all Porsche models (85% Macan/Cayenne/Panamera), correctly filtered to near-zero
-- Bootstrap state stuck at true — kept scraper on 1-page incremental mode forever
-- Per-model slug approach: query 911/boxster/cayman/718_boxster/718_cayman separately
-- Direct curl_cffi (no proxy) works better for cars.com — proxy made CF blocking worse for 911 slug
-- _is_blocked false-positive fixed — was flagging large valid pages
-- Result: cars.com 2 → 839 active listings, system total 1,750 across 9 sources
-
-### April 16, 2026 — Auction Countdown Timer
-- **auction_ends_at column** added to listings table (TEXT, ISO UTC)
-- **BaT** — reads `data-timestamp_end` Unix epoch from each `div.listing-card` card attr, converts to ISO UTC string
-- **C&B** — parses `span.ticking` HH:MM:SS countdown text at scrape time, adds to `datetime.now(UTC)` to get absolute end time
-- **db.py upsert_listing** — accepts and stores `auction_ends_at` in both UPDATE (COALESCE) and INSERT
-- **main.py** — threads `auction_ends_at` through from all scrapers to DB
-- **new_dashboard.py** — `data-ends` attribute on `span.countdown` elements; JS `updateCountdowns()` fires every 1s, formats as Xd Xh Xm or Xh Xm Xs, shows red "Ended" when expired
-- **fmv.py** — `auction_ends_at` added to `score_active_listings()` SELECT
-- 39/48 active auctions now carry end time (BaT 39; pcarmarket N/A — no end time on their cards)
-- commit fe5d7ee57
-
-### April 16, 2026 — Comp Scraper Overhaul + Search UI
-- **BaT comp scraper rebuilt** — replaced slow Playwright HTML scraper with JSON API using nonce auth (50x faster)
-- **Sales vs RNM correctly separated** — "Sold for $X" = actual sale (sold_price set), "Bid to $X" = reserve not met (sold_price NULL). Was previously treating all as sales, inflating FMV.
-- **Year filter 1986→1950** — air-cooled 911s (930/964/993/pre-964) now correctly captured in comps
-- **Trailing slash URL normalization** — fixed duplicate detection bug that caused known comps to be missed
-- **Page-level stop logic** — stops when entire page is known, not on first known URL (BaT returns mixed-age results)
-- **Daily auto-run wired in** — comp_scraper now runs once per day via timestamp file (data/last_comp_scrape.txt). Will never go stale again.
-- **Gap filled** — 5,789→6,004 comps, March 25→April 15 fully recovered
-- **Searchable listing history** — docs/search.html built, 2,747 listings, filters: VIN/model/trim/source/price/miles/status. Regenerates every scrape cycle. Linked from dashboard nav.
-- **GitHub repo renamed** — porsche-tracker → PTOX11 via API. manifest.json, sw.js, new_dashboard.py, git remote all updated.
-- **Sold comps dashboard** — was showing data only through March 25; now current through April 15
-
-### April 15, 2026 — Full Build Session
-- **Cars & Bids active listings** — `scraper_cnb.py` built, Playwright scrolls 24K px, 12 listings, 100% images, AUCTION category
-- **Built for Backroads → Playwright** — `scraper_bfb.py` built, kills last Distill dependency, 12 listings, 100% images
-- **Distill subscription cancelled** — ALL 9 sources now on local scrapers, zero cloud dependency
-- **FMV audit** — NONE confidence 14→0, HIGH 134→145, trim fallback logic fixed (GT3 Touring→GT3, Carrera 4S→Carrera), ⚠️ LOW CONF warning added to deal alerts under $15k or >70% discount
-- **PCA Mart thumbnails** — synced 27 new images to docs/img_cache/, pushed to GitHub Pages
-- **PWA installed** — manifest.json, sw.js, icons already built; user installed as iPhone app via Safari
-- **eBay mileage enrichment** — ran enrich_ebay_mileage.py, 0 mileages added (eBay private sellers don't fill specs — expected)
-- **archive_capture** — confirmed useful: HTML + screenshot of every listing saved to archive/ every 10 min
-- **iMessage alerts** — confirmed all 9 sources firing, images sending correctly for all HTTP image_url listings
-- **GitHub private repos** — FREE on personal accounts; keeping repo public because Pages requires public on free plan
-- **231 active listings** across 9 sources, 5,770 sold comps
+- pcarmarket prices extracted via `span.pcar-auction-info__price` selector
+- Comp mileage fix — extracts mileage first, then strips prefix
 
 ### April 9, 2026 — Post-Audit
-- **Audit performed** — Claude Code cold-read of full system
-- `notify_gunther.py` removed from `run_daily.sh` (Telegram dead, was running every cycle)
-- Alert price floor added: listings <$20k skipped (BaT auction bids / salvage)
-- `Cars.com` (capitalized) duplicate archived — all normalized to `cars.com`
-- HANDOVER.md rewritten to reflect actual system state (not aspirational)
-- **Key findings:** Rennlist broken, eBay collapsed, AutoTrader intermittent, 179 active vs 350+ expected
+- `notify_gunther.py` removed from `run_daily.sh` (Telegram dead)
+- Alert price floor added: listings <$20k skipped
+- `Cars.com` duplicate archived — all normalized to `cars.com`
+- HANDOVER.md rewritten to reflect actual system state
+
+### April 15, 2026 — Full Build Session
+- `scraper_cnb.py` built — Cars & Bids Playwright, 12 listings, 100% images
+- `scraper_bfb.py` built — Built for Backroads Playwright, kills last Distill dependency
+- **Distill subscription cancelled** — ALL 9 sources on local scrapers
+- FMV audit — NONE confidence 14→0, HIGH 134→145, trim fallback logic fixed
+- PWA installed — manifest.json, sw.js, icons; user installed as iPhone app via Safari
+- `archive_capture` confirmed useful: HTML + screenshot every 10 min → archive/
+- iMessage alerts confirmed for all 9 sources; images sending for all HTTP image_url listings
+- 231 active listings across 9 sources, 5,770 sold comps
+
+### April 16, 2026 — cars.com scraper fix (3 → 839 listings)
+- Root cause: broad URL with models[]= empty returned all Porsche models (85% Macan/Cayenne/Panamera)
+- Bootstrap state stuck at true — kept scraper on 1-page incremental mode forever
+- Per-model slug approach: query 911/boxster/cayman/718_boxster/718_cayman separately
+- Direct curl_cffi (no proxy) works better for cars.com
+- `_is_blocked` false-positive fixed — was flagging large valid pages
+- Result: cars.com 2 → 839 active listings, system total ~956 across 9 sources
+- Incremental mode: VIN-based stop + 3-page cap per slug (commit cc11c56a7)
+
+### April 16, 2026 — Auction Countdown Timer
+- `auction_ends_at` column added to listings table (TEXT, ISO UTC)
+- BaT reads `data-timestamp_end` Unix epoch; C&B parses `span.ticking` countdown
+- Dashboard JS `updateCountdowns()` fires every 1s, shows red "Ended" when expired
+- 39/48 active auctions carry end time (commit fe5d7ee57)
+
+### April 16, 2026 — Comp Scraper Overhaul + Search UI
+- BaT comp scraper rebuilt — JSON API + nonce auth (50x faster than Playwright)
+- Sales vs RNM correctly separated — "Sold for $X" vs "Bid to $X"
+- Year filter 1986→1950 — air-cooled 911s now captured in comps
+- Gap filled: 5,789→6,004 comps, March 25→April 15 fully recovered
+- Searchable listing history built — docs/search.html, 2,747 listings
+- GitHub repo renamed: porsche-tracker → PTOX11
+- Rennlist fixed: curl_cffi Chrome impersonation replaces broken Playwright
+
+### April 16, 2026 — CDN Images, Generation Fill, Price Drop Alerts
+- **PCA Mart CDN URL** — `image_url_cdn` column added to listings table; scraper stores
+  original CDN URL before overwriting `image_url` with local cache path; iMessage and fmv.py
+  updated to prefer `image_url_cdn` for PCA Mart thumbnails (commit e2a53cfae)
+- **sold_comps generation fill** — ran `decode_vin_generation.py`; 4,006/5,320 VINs decoded,
+  1,314 unknown; NULL generation reduced from 1,408 to 933 (15% of 6,004)
+  Fixed Python 3.9 compatibility (pipe union `int | None` → bare annotation) (commit 312ff7688)
+- **Price drop alerts** — `notify_price_drops(conn)` added to `notify_imessage.py`; fires
+  when listing drops ≥$500 in last 90 min; dedup key `"drop:{id}:{price}"`;
+  wired into main.py after notify_new_listings (commit 6318bac50)
