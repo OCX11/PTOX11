@@ -1,5 +1,5 @@
 # Vehicle Market Analyzer — Project Handover Summary
-*Last updated: April 16, 2026 (comp scraper overhaul, search UI, PTOX11 rename)*
+*Last updated: April 16, 2026 (comp scraper overhaul, mileage fix, pcarmarket prices, search UI, PTOX11 rename)*
 
 ---
 
@@ -250,6 +250,10 @@ URL: https://ocx11.github.io/porsche-tracker/
 - Listing age display fixed (created_at vs date_first_seen)
 - Independent dealers disabled from DEALERS list
 - iMessage alert wiring restored in main.py after git restore wipe
+
+- **pcarmarket prices** — extracted via `span.pcar-auction-info__price` selector. Was hardcoded None. 4/5 active listings now have prices. `$0` = auction started, no bids yet (valid).
+- **Comp mileage fix** — was stripping `49k-Mile` prefix BEFORE extracting mileage. Now extracts mileage first, then strips. 24 air-cooled comps backfilled via `enrich_bat_vins.py` visiting listing pages. 96% of 911/Cayman/Boxster comps have mileage.
+- **PM thread note** — this PM chat is very long. Start a fresh thread when tool call limits become frequent. Bootstrap new thread with HANDOVER.md content.
 
 ### April 16, 2026 — Comp Scraper Overhaul + Search UI
 - **BaT comp scraper rebuilt** — replaced slow Playwright HTML scraper with JSON API using nonce auth (50x faster)
