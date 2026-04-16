@@ -56,7 +56,7 @@ for _ch, _yr in _VIN_YEAR_SEQUENCE:
     _VIN_YEAR_CANDIDATES.setdefault(_ch, []).append(_yr)
 
 
-def vin_model_year(vin: str, db_year: int | None = None) -> int | None:
+def vin_model_year(vin: str, db_year=None):
     """Decode model year from VIN position 10 (index 9).
 
     Letters A-Y repeat every 30 years.  When a db_year hint is available
@@ -105,7 +105,7 @@ def vin_model_year(vin: str, db_year: int | None = None) -> int | None:
 # GT cars: AC2 (GT3/GT3RS/GT2RS in 997/991/992 era)
 # ---------------------------------------------------------------------------
 
-def decode_generation(vin: str, db_year: int | None = None) -> str | None:
+def decode_generation(vin: str, db_year=None):
     """
     Returns a generation string like '992', '991.2', '991.1', '997.2', '997.1',
     '996', '993', '964', '718/982', '981', '987', '986', '930', or None if unknown.
