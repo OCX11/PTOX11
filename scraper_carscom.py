@@ -143,21 +143,20 @@ def _clean(s):
 
 def _is_blocked(html):
     """
-    Return True only if the response is clearly a block/CAPTCHA page.
-    Must be a SHORT page (real Cars.com pages are 500KB+) AND contain
-    block indicators. Never flag large pages as blocked.
+    Return True only if the response is a Cloudflare challenge / block page.
+    Real Cars.com pages are 500KB+ — never flag large pages as blocked.
+    Cloudflare challenge pages are small and have title "Just a moment..."
     """
     if not html:
         return True
     if len(html) > 50_000:
-        # Large page — can't be a simple block page
-        return False
+        return False  # large page cannot be a simple block page
     lower = html.lower()
+    # True CF challenge: small page + specific title
     return (
-        "access denied" in lower
-        or "captcha" in lower
-        or "cf-error" in lower
-        or "cloudflare" in lower and "ray id" in lower
+        "just a moment" in lower
+        or "access denied" in lower
+        or ("captcha" in lower and len(html) < 50_000)
         or ("upstream connect error" in lower)
     )
 
@@ -553,49 +552,42 @@ def _fetch_curl_cffi(url):
     """
     if not _curl_cffi_available():
         return None
-    if not _PROXY_URL or not _PROXY_CFG.get("enabled") or _PROXY_DEAD:
-        log.warning("curl_cffi: proxy not available — skipping")
-        return None
     from curl_cffi import requests as cr
+
+    # Try direct (no proxy) first — cars.com Cloudflare passes direct curl_cffi
+    # cleanly. Proxy actually makes it WORSE for some model slugs.
+    try:
+        r = cr.get(url, impersonate=_CFFI_IMPERSONATE, timeout=20, allow_redirects=True)
+        if not _is_blocked(r.text) and _looks_valid(r.text):
+            log.info("curl_cffi: direct success (len=%d)", len(r.text))
+            return r.text
+        log.debug("curl_cffi: direct attempt blocked/invalid (len=%d)", len(r.text))
+    except Exception as e:
+        log.debug("curl_cffi direct attempt error: %s", e)
+
+    # Fall back to proxy rotation if direct failed
+    if not _PROXY_URL or not _PROXY_CFG.get("enabled") or _PROXY_DEAD:
+        log.warning("curl_cffi: direct failed and proxy not available")
+        return None
+
     proxies = {"http": _PROXY_URL, "https": _PROXY_URL}
-
-    headers = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "Pragma": "no-cache",
-        "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"macOS"',
-        "sec-fetch-dest": "document",
-        "sec-fetch-mode": "navigate",
-        "sec-fetch-site": "none",
-        "sec-fetch-user": "?1",
-        "upgrade-insecure-requests": "1",
-    }
-
     blocked = 0
     for attempt in range(1, _CFFI_MAX_RETRIES + 1):
         try:
             r = cr.get(
-                url,
-                impersonate=_CFFI_IMPERSONATE,
-                timeout=20,
-                proxies=proxies,
-                allow_redirects=True,
-                headers=headers,
+                url, impersonate=_CFFI_IMPERSONATE, timeout=20,
+                proxies=proxies, allow_redirects=True,
             )
             if _is_blocked(r.text) or not _looks_valid(r.text):
                 blocked += 1
                 if attempt % 5 == 0:
-                    log.info("curl_cffi: %d/%d attempts blocked so far, retrying...", blocked, attempt)
+                    log.info("curl_cffi: %d/%d proxy attempts blocked, retrying...", blocked, attempt)
                 time.sleep(0.3)
                 continue
-            log.info("curl_cffi: success on attempt %d/%d (len=%d)", attempt, _CFFI_MAX_RETRIES, len(r.text))
+            log.info("curl_cffi: proxy success on attempt %d/%d (len=%d)", attempt, _CFFI_MAX_RETRIES, len(r.text))
             return r.text
         except Exception as e:
-            log.debug("curl_cffi attempt %d error: %s", attempt, e)
+            log.debug("curl_cffi proxy attempt %d error: %s", attempt, e)
             blocked += 1
             time.sleep(0.3)
             continue
