@@ -305,9 +305,9 @@ def notify_new_listings(conn, new_listing_ids):
             log.debug("Skip new-listing alert (already sent): %s", seen_key[:80])
             continue
 
-        log.info("NEW LISTING: %s %s %s  ask=$%s",
+        log.info("NEW LISTING: %s %s %s  ask=%s",
                  s.get("year"), s.get("model"), s.get("trim") or "",
-                 f"{s['price']:,}" if s.get("price") else "?")
+                 f"${s['price']:,}" if s.get("price") else "no price")
 
         msg = _format_new_listing(s)
         ok  = _send_imessage(recipient, msg)
