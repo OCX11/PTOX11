@@ -3,8 +3,7 @@ Standalone AutoTrader scraper for Porsche listings.
 
 Strategy (in order of preference):
   1. requests → www.autotrader.com desktop search page (fastest; may be blocked)
-  2. headed Playwright → same URL (bypasses Akamai bot detection)
-  3. headless Playwright + stealth → same URL (fallback)
+  2. headless Playwright + stealth → same URL (fallback)
   4. AutoTrader REST API → /rest/lsc/listing (JSON, no HTML parsing needed)
 
 The desktop search page embeds all listing data in a __NEXT_DATA__ JSON blob.
@@ -855,15 +854,9 @@ def _fetch_page(url):
         log.info("  ✓ requests succeeded (len=%d)", len(html))
         return html
 
-    # Strategy 3: headed Playwright (bypasses Akamai bot detection)
-    log.info("  requests blocked/failed — trying headed Playwright")
-    html = _fetch_playwright(url, headless=False)
-    if html:
-        log.info("  ✓ headed Playwright succeeded (len=%d)", len(html))
-        return html
-
-    # Strategy 4: headless Playwright + stealth
-    log.info("  headed Playwright failed — trying headless Playwright")
+    # Strategy 3: headless Playwright + stealth
+    # Note: headed (visible) Playwright removed — opens Chrome window on screen
+    log.info("  requests blocked/failed — trying headless Playwright")
     html = _fetch_playwright(url, headless=True)
     if html:
         log.info("  ✓ headless Playwright succeeded (len=%d)", len(html))
