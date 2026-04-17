@@ -153,6 +153,36 @@ def _fetch_html():
                 time.sleep(0.25)
             time.sleep(1)
 
+            # Inject auction end times into the DOM before handing off to BS4.
+            # C&B renders countdowns via React state — not in static HTML.
+            # We read the JS timer values and stamp them as data-ends-iso on each li.
+            page.evaluate("""() => {
+                document.querySelectorAll('li.auction-item').forEach(li => {
+                    // Try React fiber props to find endsAt timestamp
+                    const tryFiber = (el) => {
+                        const key = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactProps'));
+                        if (!key) return null;
+                        try {
+                            const props = el[key];
+                            const str = JSON.stringify(props);
+                            const m = str.match(/(endsAt|endTime|ends_at)[\s'":\\]+([0-9T:\-Z+\.]{10,30})/);
+                            return m ? m[2] : null;
+                        } catch(e) { return null; }
+                    };
+                    // Walk all descendants for React data
+                    const all = li.querySelectorAll('*');
+                    for (let el of all) {
+                        const val = tryFiber(el);
+                        if (val) { li.setAttribute('data-ends-iso', val); break; }
+                    }
+                    // Also check ticking span text directly
+                    const tick = li.querySelector('.ticking');
+                    if (tick && tick.textContent.trim()) {
+                        li.setAttribute('data-ticking-text', tick.textContent.trim());
+                    }
+                });
+            }""")
+            time.sleep(0.5)
             return page.content()
         finally:
             browser.close()
@@ -236,7 +266,24 @@ def _parse_cards(html):
                         auction_ends_at = _parse_cnb_countdown(el_text)
                         if auction_ends_at:
                             break
-        # Fallback: data attribute on the li (Unix timestamp)
+        # Fallback 1: ticking text injected via JS into data-ticking-text
+        if not auction_ends_at:
+            ticking_text = item.get("data-ticking-text")
+            if ticking_text:
+                auction_ends_at = _parse_cnb_countdown(ticking_text)
+
+        # Fallback 2: ISO timestamp injected via JS into data-ends-iso
+        if not auction_ends_at:
+            iso_val = item.get("data-ends-iso")
+            if iso_val:
+                try:
+                    from datetime import datetime as _dt
+                    # Normalise and store as-is if already ISO
+                    auction_ends_at = iso_val.strip()
+                except Exception:
+                    pass
+
+        # Fallback 3: data attribute on the li (Unix timestamp)
         if not auction_ends_at:
             for attr in ("data-time", "data-end", "data-expires", "data-ends-at"):
                 val = item.get(attr)
