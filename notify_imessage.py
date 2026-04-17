@@ -109,6 +109,8 @@ def _send_imessage(recipient: str, text: str) -> bool:
     safe_text = text.replace("\\", "\\\\").replace('"', '\\"')
     script = f'''
 tell application "Messages"
+    activate
+    delay 0.5
     set targetService to first service whose service type is iMessage
     set targetBuddy to buddy "{recipient}" of targetService
     send "{safe_text}" to targetBuddy
@@ -287,6 +289,8 @@ def notify_new_listings(conn, new_listing_ids):
         if ok:
             sent += 1
             log.info("  → iMessage sent to %s", recipient)
+            import time as _time
+            _time.sleep(1.0)  # let Messages settle before sending image
             # Prefer CDN URL for PCA Mart (image_url is local /static/img_cache/ path)
             img_url = s.get("image_url") or ""
             if img_url.startswith("/static/"):
