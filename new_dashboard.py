@@ -402,7 +402,8 @@ def generate() -> str:
         active = d["active"]
         def _keep(c):
             if (c.get("dealer") or "").lower() == "holt motorsports": return False
-            if (c.get("year") or 9999) < 1984: return False
+            yr = int(c.get("year") or 0)
+            if yr < 1986 or yr > 2024: return False
             return True
         active = [c for c in active if _keep(c)]
         for c in active:
@@ -501,10 +502,10 @@ button {{ cursor:pointer; border:none; background:none; font:inherit; color:inhe
 }}
 .logo span {{ color:var(--red); }}
 .nav-item {{
-  font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
+  font-family:'DM Mono',monospace; font-size:13px; font-weight:500;
   letter-spacing:0.5px; text-transform:uppercase;
-  color:var(--muted); padding:0 14px; height:52px;
-  display:flex; align-items:center; gap:0;
+  color:var(--muted); padding:0 16px; height:52px;
+  display:flex; align-items:center;
   border-bottom:2px solid transparent; transition:all 0.1s;
   cursor:pointer;
 }}
@@ -606,13 +607,26 @@ button {{ cursor:pointer; border:none; background:none; font:inherit; color:inhe
 }}
 .search-wrap {{ position:relative; }}
 .search-input {{
-  padding:7px 12px 7px 30px; border:1px solid var(--border); border-radius:4px;
-  font-family:'DM Mono',monospace; font-size:11px; width:220px;
-  outline:none; background:var(--bg3); color:var(--text);
+  padding:8px 16px 8px 36px;
+  border:1px solid rgba(255,255,255,0.12);
+  border-radius:10px;
+  font-family:'DM Mono',monospace; font-size:12px; width:260px;
+  outline:none;
+  background:rgba(255,255,255,0.07);
+  color:var(--text);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  box-shadow:0 2px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.06);
+  transition:all 0.15s;
 }}
-.search-input::placeholder {{ color:var(--muted); }}
-.search-input:focus {{ border-color:var(--red); }}
-.search-icon {{ position:absolute; left:9px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:12px; }}
+.search-input::placeholder {{ color:rgba(255,255,255,0.3); }}
+.search-input:focus {{
+  border-color:rgba(255,255,255,0.25);
+  background:rgba(255,255,255,0.1);
+  box-shadow:0 4px 20px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1);
+  width:300px;
+}}
+.search-icon {{ position:absolute; left:11px; top:50%; transform:translateY(-50%); color:rgba(255,255,255,0.35); font-size:13px; }}
 .results-count {{
   font-family:'DM Mono',monospace; font-size:10px; color:var(--muted);
 }}
