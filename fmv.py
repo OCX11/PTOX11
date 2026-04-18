@@ -85,6 +85,41 @@ def get_generation(year: Optional[int], model: str, trim: str = "") -> str:
 
 # Maps messy/variant trim strings to a canonical form for grouping
 _TRIM_ALIASES = {
+    # ── Air-cooled body-style preservation ──────────────────────────────────
+    # For G-series (3.2), 964, 993 — coupe/cabriolet/targa have 30-40% price
+    # gaps. Preserve body style in the canonical trim so they don't get pooled.
+    # BaT comp trims look like: "Carrera Coupe G50", "Carrera Cabriolet M491",
+    # "Carrera Targa 5-Speed", "Turbo Cabriolet M505 Slant Nose", etc.
+    "carrera coupe g50":                "Carrera Coupe",
+    "carrera coupe 3.4l g50":           "Carrera Coupe",
+    "carrera coupe 3.6l g50":           "Carrera Coupe",
+    "carrera coupe":                    "Carrera Coupe",
+    "carrera cabriolet":                "Carrera Cabriolet",
+    "carrera cabriolet 6-speed":        "Carrera Cabriolet",
+    "carrera cabriolet 5-speed":        "Carrera Cabriolet",
+    "carrera coupe 5-speed":            "Carrera Coupe",
+    "carrera cabriolet g50":            "Carrera Cabriolet",
+    "carrera cabriolet m491":           "Carrera Cabriolet",
+    "carrera targa g50":                "Carrera Targa",
+    "carrera targa 5-speed":            "Carrera Targa",
+    "turbo coupe 5-speed":              "Turbo Coupe",
+    "turbo coupe":                      "Turbo Coupe",
+    "turbo cabriolet m505 slant nose":  "Turbo Cabriolet",
+    "turbo targa":                      "Turbo Targa",
+    # 964-era body variants
+    "carrera 2 coupe":                  "Carrera Coupe",
+    "carrera 2 coupe 5-speed":          "Carrera Coupe",
+    "carrera 2 cabriolet":              "Carrera Cabriolet",
+    "carrera 2 cabriolet 5-speed":      "Carrera Cabriolet",
+    "carrera 2 targa":                  "Carrera Targa",
+    "carrera 4 coupe 5-speed":          "Carrera 4",
+    "carrera 4 cabriolet 5-speed":      "Carrera 4",
+    "carrera 2 speedster":              "Speedster",
+    # 993-era body variants
+    "carrera s coupe":                  "Carrera S",
+    "carrera coupe 6-speed":            "Carrera Coupe",
+    "targa 5-speed":                    "Carrera Targa",
+
     # GT3 family
     "gt3 rs weissach":          "GT3 RS",
     "gt3 rs tribute to carrera rs": "GT3 RS",
@@ -108,10 +143,7 @@ _TRIM_ALIASES = {
     "turbo s coupe":            "Turbo S",
     "turbo s":                  "Turbo S",
     "turbo coupe 6-speed":      "Turbo",
-    "turbo coupe 5-speed":      "Turbo",
-    "turbo coupe":              "Turbo",
     "turbo cabriolet":          "Turbo",
-    "turbo targa":              "Turbo",
     "turbo":                    "Turbo",
     # Carrera variants
     "carrera 4s 6-speed":       "Carrera 4S",
@@ -123,11 +155,6 @@ _TRIM_ALIASES = {
     "carrera s":                "Carrera S",
     "carrera gts":              "Carrera GTS",
     "carrera rs":               "Carrera RS",
-    "carrera cabriolet 6-speed": "Carrera",
-    "carrera cabriolet g50":    "Carrera",
-    "carrera cabriolet":        "Carrera",
-    "carrera targa g50":        "Carrera Targa",
-    "carrera targa 5-speed":    "Carrera Targa",
     "carrera targa":            "Carrera Targa",
     "carrera g50":              "Carrera",
     "carrera 6-speed":          "Carrera",
@@ -139,7 +166,6 @@ _TRIM_ALIASES = {
     "spyder 6-speed":           "Spyder",
     "spyder":                   "Spyder",
     "targa 4s":                 "Targa 4S",
-    "targa 5-speed":            "Targa",
     "targa":                    "Targa",
     # Air-cooled
     "sc 5-speed":               "SC",
@@ -183,7 +209,6 @@ _TRIM_ALIASES = {
     # same canonical so they can match in _trim_match_score.
     "carrera s coupe 7-speed":          "Carrera S",
     "carrera s coupe 6-speed":          "Carrera S",
-    "carrera s coupe":                  "Carrera S",
     "carrera s cabriolet 7-speed":      "Carrera S",
     "carrera s cabriolet 6-speed":      "Carrera S",
     "carrera s cabriolet":              "Carrera S",
@@ -200,10 +225,8 @@ _TRIM_ALIASES = {
     "carrera gts cabriolet 6-speed":    "Carrera GTS",
     "carrera gts cabriolet":            "Carrera GTS",
     "carrera 4 coupe 6-speed":          "Carrera 4",
-    "carrera 4 coupe 5-speed":          "Carrera 4",
     "carrera 4 coupe":                  "Carrera 4",
     "carrera 4 cabriolet 6-speed":      "Carrera 4",
-    "carrera 4 cabriolet 5-speed":      "Carrera 4",
     "carrera 4 cabriolet":              "Carrera 4",
     "carrera t coupe 7-speed":          "Carrera T",
     "carrera t coupe 6-speed":          "Carrera T",
@@ -237,8 +260,6 @@ _TRIM_ALIASES = {
     # ── Carrera base body-style variants ─────────────────────────────────────
     # BaT comps for base 911 Carrera include body style in trim.
     "carrera coupe 7-speed":            "Carrera",
-    "carrera coupe 6-speed":            "Carrera",
-    "carrera coupe":                    "Carrera",
     "carrera s coupe 2d":               "Carrera S",
 
     # ── "2dr/4dr" body-style-first formats (AutoTrader/eBay/Cars.com) ────────
@@ -262,13 +283,11 @@ _TRIM_ALIASES = {
     "911 carrera":                      "Carrera",
 
     # ── G-Series / air-cooled era variant names ───────────────────────────────
-    "carrera 2 speedster":              "Speedster",
-    "carrera 2 cabriolet":              "Carrera",
     "carrera 2":                        "Carrera",
     "carrera 3.2":                      "Carrera",
     "carrera 3.2 cabriolet":            "Carrera",
-    "cabriolet":                        "Carrera",     # bare Cabriolet = base Carrera cab
-    "coupe 5-speed":                    "Carrera",     # G-series base coupe
+    "cabriolet":                        "Carrera Cabriolet",  # bare Cabriolet = Carrera Cabriolet
+    "coupe 5-speed":                    "Carrera Coupe",  # G-series base coupe
 
     # ── Keyword-prefixed descriptions (dealer marketing text in trim field) ───
     # Prefix matching handles longer strings that START with these keys.
@@ -457,10 +476,12 @@ def _trim_match_score(target_trim: Optional[str], comp_trim: Optional[str]) -> f
     gt3_family = {"GT3", "GT3 Touring", "GT3 RS", "GT3 Cup"}
     gt2_family = {"GT2", "GT2 RS"}
     gt4_family = {"GT4", "GT4 RS"}
-    turbo_family = {"Turbo", "Turbo S"}
+
     carrera_family = {"Carrera", "Carrera S", "Carrera 4", "Carrera 4S",
                       "Carrera GTS", "Carrera Targa", "Carrera RS",
-                      "Carrera T", "Targa 4S", "Targa 4 GTS"}
+                      "Carrera T", "Targa 4S", "Targa 4 GTS",
+                      "Carrera Coupe", "Carrera Cabriolet"}
+    turbo_family = {"Turbo", "Turbo S", "Turbo Coupe", "Turbo Cabriolet", "Turbo Targa"}
     spyder_family = {"Spyder", "Spyder RS"}
     mid_engine_s_family = {"S", "GTS", "T", "Cayman", "Boxster"}
 
