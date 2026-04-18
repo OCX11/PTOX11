@@ -1,14 +1,13 @@
 """
-new_dashboard.py — Redesigned unified dashboard.
+new_dashboard.py — PTOX11 redesigned dashboard.
 
-Layout inspired by porsche-db.com:
-  - Clean white, minimal chrome
-  - Left sidebar: filters + nav
-  - Main area defaults to "New Listings" (live feed view — newest first, all sources)
-  - Secondary views: Market Analysis, Auctions, Sold Comps
-  - Single self-contained HTML file, no external dependencies
+Design system per ptox11_critique.html:
+  - Colors: --red #D6293E · --bg #0A0A0C · --bg2 #111116 · --bg3 #18181F
+  - Fonts: Syne (headings) · DM Mono (data) · DM Sans (body)
+  - Nav: PTOX logo, Listings · Auctions · Comps · Market · Search
+  - Cards: image overlays, FMV progress bar, chip filters
 
-Output: static/index.html
+Output: docs/index.html
 """
 from __future__ import annotations
 
@@ -27,13 +26,12 @@ BASE_DIR  = Path(__file__).parent
 OUT_PATH  = BASE_DIR / "docs" / "index.html"
 LOG_DIR   = BASE_DIR / "logs"
 
-# ── Source health (reused from dashboard.py) ─────────────────────────────────
+# ── Source health ─────────────────────────────────────────────────────────────
 
 _TS_RE = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 _SOURCES = [
-    ("Main Scraper",   "scraper.log",          "Dealers + BaT + PCA",     "com.porschetracker.scrape",          45),
-
-    ("Archive",        "archive_capture.log",  "HTML+screenshot capture", "com.porschetracker.archive-capture", 30),
+    ("Main Scraper", "scraper.log", "Dealers + BaT + PCA", "com.porschetracker.scrape", 45),
+    ("Archive", "archive_capture.log", "HTML+screenshot capture", "com.porschetracker.archive-capture", 30),
 ]
 
 def _launchd_pid(label):
@@ -114,89 +112,90 @@ def _age_label(dt_str: str) -> str:
     if h < 24:     return f"{h}h ago"
     return f"{h // 24}d ago"
 
-# Source badge config — dark-mode friendly (semi-transparent tinted backgrounds)
+# Source badge config
 _BADGE_CFG = {
-    "bring a trailer": ("#1e3a5f", "#60a5fa", "BaT"),
-    "bat":             ("#1e3a5f", "#60a5fa", "BaT"),
-    "pcarmarket":      ("#14532d", "#4ade80", "pcarmarket"),
-    "cars & bids":     ("#431407", "#fb923c", "C&B"),
-    "carsandbids":     ("#431407", "#fb923c", "C&B"),
-    "classic.com":     ("#3b0764", "#c084fc", "classic"),
-    "rennlist":        ("#4c0519", "#f472b6", "Rennlist"),
-    "pca mart":        ("#0c4a6e", "#38bdf8", "PCA Mart"),
-    "autotrader":      ("#3f2d00", "#fbbf24", "AutoTrader"),
-    "cars.com":        ("#052e16", "#86efac", "Cars.com"),
-    "ebay motors":     ("#3f1f00", "#fb923c", "eBay"),
+    "bring a trailer": ("#0D1F35", "#60a5fa", "BaT"),
+    "bat":             ("#0D1F35", "#60a5fa", "BaT"),
+    "pcarmarket":      ("#0A1F14", "#4ade80", "pcarmarket"),
+    "cars & bids":     ("#1F0D03", "#fb923c", "C&B"),
+    "carsandbids":     ("#1F0D03", "#fb923c", "C&B"),
+    "classic.com":     ("#1A0B2E", "#c084fc", "classic"),
+    "rennlist":        ("#1F0A10", "#f472b6", "Rennlist"),
+    "pca mart":        ("#051520", "#38bdf8", "PCA Mart"),
+    "autotrader":      ("#1F1600", "#fbbf24", "AutoTrader"),
+    "cars.com":        ("#031208", "#86efac", "Cars.com"),
+    "ebay motors":     ("#1F0F00", "#fb923c", "eBay"),
+    "dupont registry": ("#1A0505", "#f87171", "DuPont"),
+    "built for backroads": ("#0A1520", "#7dd3fc", "BfB"),
 }
 _AUCTION_SET = frozenset({"bring a trailer","bat","bringatrailer","pcarmarket","cars & bids","carsandbids","classic.com"})
 
 def _badge(dealer: str) -> str:
     k = (dealer or "").lower().strip()
-    bg, fg, label = _BADGE_CFG.get(k, ("#f3f4f6", "#374151", (dealer or "?")[:12]))
+    bg, fg, label = _BADGE_CFG.get(k, ("#18181F", "#6B6B7D", (dealer or "?")[:12]))
     return f'<span class="badge" style="background:{bg};color:{fg}">{_h(label)}</span>'
 
 def _is_auction(dealer: str) -> bool:
     return (dealer or "").lower().strip() in _AUCTION_SET
 
-def _delta_html(price, fmv_val, conf) -> str:
-    """Compact % chip for non-auction cards."""
-    if not price or not fmv_val or conf == "NONE": return ""
+def _fmv_pct(price, fmv_val):
+    """Return float pct or None."""
+    if not price or not fmv_val:
+        return None
     try:
-        pct = (float(price) - float(fmv_val)) / float(fmv_val) * 100
-    except: return ""
-    if abs(pct) < 2:    cls, txt = "delta-flat",  "≈ FMV"
-    elif pct < -10:     cls, txt = "delta-great", f"↓{abs(pct):.0f}%"
-    elif pct < 0:       cls, txt = "delta-good",  f"↓{abs(pct):.0f}%"
-    elif pct > 15:      cls, txt = "delta-high",  f"↑{pct:.0f}%"
-    else:               cls, txt = "delta-mid",   f"↑{pct:.0f}%"
-    return f'<span class="delta {cls}" title="{pct:+.1f}% vs FMV · Est. FMV {_p(fmv_val)}">{txt}</span>'
+        return (float(price) - float(fmv_val)) / float(fmv_val) * 100
+    except Exception:
+        return None
 
-def _fmv_block(price, fmv_val, conf, comp_count, is_auction) -> str:
-    """Full FMV line shown on every card. Auctions get the most detail."""
+def _delta_badge(pct):
+    """Small badge for card overlay / price row."""
+    if pct is None: return ""
+    if abs(pct) < 2:    cls, txt = "delta-flat",  "≈FMV"
+    elif pct < -10:     cls, txt = "delta-great", f"&#x2193;{abs(pct):.0f}%"
+    elif pct < 0:       cls, txt = "delta-good",  f"&#x2193;{abs(pct):.0f}%"
+    elif pct > 15:      cls, txt = "delta-high",  f"&#x2191;{pct:.0f}%"
+    else:               cls, txt = "delta-mid",   f"&#x2191;{pct:.0f}%"
+    return f'<span class="delta {cls}">{txt}</span>'
+
+def _fmv_bar_block(price, fmv_val, conf, comp_count) -> str:
+    """FMV progress bar block shown on every card."""
     if not fmv_val or conf == "NONE":
-        return '<div class="fmv-line fmv-none">FMV: not enough comps yet</div>'
-    try:
-        pct = (float(price) - float(fmv_val)) / float(fmv_val) * 100 if price else None
-    except:
-        pct = None
-
+        return ('<div class="fmv-none">'
+                '<span class="fmv-none-dot"></span>No FMV &mdash; insufficient comps'
+                '</div>')
+    pct = _fmv_pct(price, fmv_val)
     fmv_str = _p(fmv_val)
     comp_str = f"{comp_count} comp{'s' if comp_count != 1 else ''}"
 
     if pct is None:
-        rel = ""
-        cls = "fmv-neutral"
-    elif abs(pct) < 2:
-        rel = "at market"
-        cls = "fmv-neutral"
-    elif pct < -10:
-        rel = f"<strong>{abs(pct):.0f}% below FMV</strong> 🔥"
-        cls = "fmv-great"
+        bar_w = 50; bar_cls = "bar-neutral"; delta_str = ""
+    elif pct < -30:
+        bar_w = max(5, int(50 + pct * 0.5)); bar_cls = "bar-great"; delta_str = f"&#x2193;{abs(pct):.0f}% vs FMV"
     elif pct < 0:
-        rel = f"{abs(pct):.0f}% below FMV"
-        cls = "fmv-good"
-    elif pct > 15:
-        rel = f"<strong>{pct:.0f}% above FMV</strong>"
-        cls = "fmv-high"
+        bar_w = int(50 + pct * 0.5); bar_cls = "bar-good"; delta_str = f"&#x2193;{abs(pct):.0f}% vs FMV"
+    elif abs(pct) < 2:
+        bar_w = 50; bar_cls = "bar-neutral"; delta_str = "at market"
+    elif pct < 15:
+        bar_w = int(50 + pct * 0.5); bar_cls = "bar-mid"; delta_str = f"&#x2191;{pct:.0f}% vs FMV"
     else:
-        rel = f"{pct:.0f}% above FMV"
-        cls = "fmv-mid"
+        bar_w = min(95, int(50 + pct * 0.5)); bar_cls = "bar-high"; delta_str = f"&#x2191;{pct:.0f}% vs FMV"
 
-    conf_dot = {"HIGH": "🟢", "MEDIUM": "🟡", "LOW": "🔴"}.get(conf, "⚪")
+    bar_w = max(3, min(97, bar_w))
 
-    if is_auction:
-        # Full treatment for auctions: FMV figure prominent, relationship clear
-        return (f'<div class="fmv-line {cls}">'
-                f'{conf_dot} Est. FMV <span class="fmv-val">{fmv_str}</span>'
-                f'{(" · " + rel) if rel else ""}'
-                f' <span class="fmv-comps">({comp_str})</span>'
-                f'</div>')
-    else:
-        # Compact for retail/dealer
-        return (f'<div class="fmv-line {cls}">'
-                f'{conf_dot} FMV ~{fmv_str}'
-                f'{(" · " + rel) if rel else ""}'
-                f'</div>')
+    return (f'<div class="fmv-block">'
+            f'<div class="fmv-top-row">'
+            f'<span class="fmv-label">Ask vs FMV</span>'
+            f'<span class="fmv-delta-txt {bar_cls}">{delta_str}</span>'
+            f'</div>'
+            f'<div class="fmv-bar-wrap">'
+            f'<div class="fmv-bar-fill {bar_cls}" style="width:{bar_w}%"></div>'
+            f'<div class="fmv-bar-midline"></div>'
+            f'</div>'
+            f'<div class="fmv-bottom-row">'
+            f'<span class="fmv-val-txt">FMV {fmv_str}</span>'
+            f'<span class="fmv-comps-txt">{comp_str}</span>'
+            f'</div>'
+            f'</div>')
 
 # ── Generation helper ─────────────────────────────────────────────────────────
 
@@ -204,8 +203,7 @@ def _gen(year, model):
     if not year: return "Unknown"
     y = int(year); m = (model or "").lower()
     if "911" in m or m in ("911","930","964","993","996","997","991","992"):
-        if y <= 1977: return "G-Series"
-        if y <= 1989: return "G-Series" if y < 1989 else ("G-Series" if "carrera" in m else "964")
+        if y <= 1989: return "G-Series"
         if y <= 1994: return "964"
         if y <= 1998: return "993"
         if y <= 2004: return "996"
@@ -218,8 +216,9 @@ def _gen(year, model):
         if y <= 2004: return "986"
         if y <= 2012: return "987"
         if y <= 2016: return "981"
-        return "718/982"
+        return "718"
     return "Unknown"
+
 
 # ── Card builder ──────────────────────────────────────────────────────────────
 
@@ -232,42 +231,47 @@ def _card(car: dict, fmv_score: dict) -> str:
     mileage  = car.get("mileage")
     url      = car.get("listing_url", "") or "#"
     img      = car.get("image_url", "") or ""
-    # Rewrite PCA Mart local cache paths for GitHub Pages
     if img and img.startswith("/static/img_cache/"):
         img = "img_cache/" + img.split("/")[-1]
     created  = car.get("created_at", "") or car.get("date_first_seen", "")
     location = car.get("location", "") or ""
     trans    = car.get("transmission", "") or ""
-    days          = car.get("days_on_site") or 0
-    tier          = car.get("tier", "") or ""
+    days     = car.get("days_on_site") or 0
+    tier     = car.get("tier", "") or ""
     auction_ends_at = car.get("auction_ends_at") or ""
     is_auc   = _is_auction(dealer)
 
     fmv_val    = fmv_score.get("fmv")
     conf       = fmv_score.get("confidence", "NONE")
     comp_count = fmv_score.get("comp_count", 0)
-    delta      = _delta_html(price, fmv_val, conf)
-    fmv_block  = _fmv_block(price, fmv_val, conf, comp_count, is_auc)
+    pct        = _fmv_pct(price, fmv_val) if conf != "NONE" else None
+    fmv_bar    = _fmv_bar_block(price, fmv_val, conf, comp_count)
+    age_str    = _age_label(created)
+    gen_str    = _gen(year, model)
 
-    age_str  = _age_label(created)
+    # Deal badge — only show if 10%+ below FMV
+    deal_badge = ""
+    if pct is not None and pct <= -10:
+        deal_badge = f'<div class="img-deal-badge">{chr(8595)}{abs(pct):.0f}%</div>'
 
-    # Price label
-    if is_auc:
-        price_lbl = "Current Bid"
-        price_cls = "price-auction"
-    else:
-        price_lbl = "Asking"
-        price_cls = "price-ask"
+    # Gen badge on image
+    gen_badge = f'<div class="img-gen-badge">{_h(gen_str)}</div>'
 
-    # Image — onerror swaps to a styled SVG placeholder so no broken icons
-    placeholder_svg = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='165'%3E%3Crect width='400' height='165' fill='%231e2530'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' font-family='sans-serif' font-size='13' fill='%234b5563'%3ENo photo%3C/text%3E%3C/svg%3E"
-    # For PCA Mart images, fetch via JS with the correct Referer header
-    # (hotlink protection blocks direct <img src> from file:// pages)
+    # Tier badge
+    tier_html = ""
+    if tier == "TIER1":
+        tier_html = '<span class="tier-badge">GT / Collector</span>'
+
+    # Placeholder SVG
+    placeholder_svg = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='165'%3E"
+                       "%3Crect width='400' height='165' fill='%2318181F'/%3E"
+                       "%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' "
+                       "font-family='monospace' font-size='12' fill='%2325252E'%3ENo photo%3C/text%3E%3C/svg%3E")
+
     is_pca_img = "mart.pca.org" in img
     if img and is_pca_img:
         img_id = f"pcaimg_{abs(hash(img)) % 999999}"
-        img_html = (
-            f'<div class="card-img-wrap">'
+        img_inner = (
             f'<img id="{img_id}" src="{placeholder_svg}" alt="{_h(str(year)+" "+model)}" class="card-img" loading="lazy">'
             f'<script>(function(){{'
             f'var x=new XMLHttpRequest();x.open("GET","{_h(img)}",true);'
@@ -276,61 +280,68 @@ def _card(car: dict, fmv_score: dict) -> str:
             f'x.onload=function(){{if(x.status==200){{var u=URL.createObjectURL(x.response);document.getElementById("{img_id}").src=u;}}}};'
             f'x.send();'
             f'}})();</script>'
-            f'</div>'
+        )
+    elif img:
+        img_inner = (
+            f'<img src="{_h(img)}" alt="{_h(str(year)+" "+model)}" class="card-img" loading="lazy" '
+            f'onerror="this.src=\'{placeholder_svg}\'">'
         )
     else:
-        img_html = (
-            f'<div class="card-img-wrap">'
-            f'<img src="{_h(img)}" alt="{_h(str(year)+" "+model)}" class="card-img" loading="lazy" '
-            f'onerror="this.src=\'{placeholder_svg}\';this.classList.add(\'img-fallback\')">'
-            f'</div>'
-            if img else
-            f'<div class="card-img-wrap">'
-            f'<img src="{placeholder_svg}" alt="No photo" class="card-img img-fallback">'
-            f'</div>'
-        )
+        img_inner = f'<img src="{placeholder_svg}" alt="No photo" class="card-img">'
 
-    # Tier badge
-    tier_html = ""
-    if tier == "TIER1":
-        tier_html = '<span class="tier-badge">GT / Collector</span>'
+    img_html = (
+        f'<div class="card-img-wrap">'
+        f'{img_inner}'
+        f'{gen_badge}'
+        f'{deal_badge}'
+        f'</div>'
+    )
+
+    # Price label
+    price_lbl = "Bid" if is_auc else "Ask"
+    price_cls  = "price-auction" if is_auc else "price-ask"
 
     # Meta chips
     chips = []
     if trans:    chips.append(_h(trans))
     if mileage:  chips.append(f"{_m(mileage)} mi")
-    if location: chips.append(f"📍 {_h(location[:22])}")
-    chips_html = " · ".join(chips)
+    if location: chips.append(_h(location[:22]))
+    chips_html = " &middot; ".join(chips)
 
-    # Days sitting — flag if stale
     days_html = ""
     if days and int(days) >= 30:
-        days_html = f' · <span class="days-stale">⏱ {days}d listed</span>'
+        days_html = f' &middot; <span class="days-stale">{days}d listed</span>'
 
-    # Auction end time / countdown
     ends_html = ""
     if is_auc and auction_ends_at:
-        ends_html = f'<div class="auction-ends">Ends: <span class="countdown" data-ends="{_h(auction_ends_at)}">…</span></div>'
+        ends_html = (f'<div class="auction-ends">'
+                     f'Ends <span class="countdown" data-ends="{_h(auction_ends_at)}">…</span>'
+                     f'</div>')
 
-    return f"""<div class="card" data-dealer="{_h(dealer)}" data-year="{year}" data-model="{_h(model)}" data-gen="{_h(_gen(year,model))}" data-tier="{_h(tier)}" data-price="{price or 0}" data-source-type="{'auction' if is_auc else 'retail'}" onclick="window.open('{_h(url)}','_blank')">
-  {img_html}
-  <div class="card-body">
-    <div class="card-top-row">
-      {_badge(dealer)}
-      <span class="card-age">{age_str}</span>
-    </div>
-    <div class="card-title">{year} Porsche {_h(model)}{(' ' + _h(trim)) if trim else ''}</div>
-    {tier_html}
-    <div class="card-price-row">
-      <span class="price-label">{price_lbl}</span>
-      <span class="{price_cls}">{_p(price)}</span>
-      {delta if not is_auc else ""}
-    </div>
-    {fmv_block}
-    {ends_html}
-    <div class="card-meta">{chips_html}{days_html}</div>
-  </div>
-</div>"""
+    return (
+        f'<div class="card" '
+        f'data-dealer="{_h(dealer)}" data-year="{year}" data-model="{_h(model)}" '
+        f'data-gen="{_h(gen_str)}" data-tier="{_h(tier)}" data-price="{price or 0}" '
+        f'data-source-type="{"auction" if is_auc else "retail"}" '
+        f'onclick="window.open(\'{_h(url)}\',\'_blank\')">\n'
+        f'  {img_html}\n'
+        f'  <div class="card-body">\n'
+        f'    <div class="card-top-row">'
+        f'{_badge(dealer)}'
+        f'<span class="card-age">{age_str}</span>'
+        f'</div>\n'
+        f'    <div class="card-title">{year} Porsche {_h(model)}{(" " + _h(trim)) if trim else ""}</div>\n'
+        f'    {tier_html}\n'
+        f'    <div class="card-price-row">'
+        f'<span class="price-lbl">{price_lbl}</span>'
+        f'<span class="{price_cls}">{_p(price)}</span>'
+        f'</div>\n'
+        f'    {fmv_bar}\n'
+        f'    {ends_html}\n'
+        f'    <div class="card-meta">{chips_html}{days_html}</div>\n'
+        f'  </div>\n'
+        f'</div>'
+    )
 
 # ── Sold comp row ─────────────────────────────────────────────────────────────
 
@@ -346,27 +357,27 @@ def _comp_row(c: dict) -> str:
     trans    = c.get("transmission", "") or ""
     gen      = c.get("generation") or _gen(year, model)
 
-    return f"""<tr class="comp-row" data-gen="{_h(gen)}" data-year="{year}" data-model="{_h(model)}">
-  <td>{_badge(source)}</td>
-  <td>{year}</td>
-  <td class="td-model">{_h(model)} {_h(trim)}</td>
-  <td>{_h(gen)}</td>
-  <td>{_h(trans) or '—'}</td>
-  <td>{_m(mileage)}</td>
-  <td class="td-price">{_p(price)}</td>
-  <td>{sold_dt or '—'}</td>
-  <td><a href="{_h(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="tbl-link">→</a></td>
-</tr>"""
+    return (f'<tr class="comp-row" data-gen="{_h(gen)}" data-year="{year}" data-model="{_h(model)}">\n'
+            f'  <td>{_badge(source)}</td>\n'
+            f'  <td>{year}</td>\n'
+            f'  <td class="td-model">{_h(model)} {_h(trim)}</td>\n'
+            f'  <td>{_h(gen)}</td>\n'
+            f'  <td>{_h(trans) or "—"}</td>\n'
+            f'  <td>{_m(mileage)}</td>\n'
+            f'  <td class="td-price">{_p(price)}</td>\n'
+            f'  <td>{sold_dt or "—"}</td>\n'
+            f'  <td><a href="{_h(url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" class="tbl-link">&#x2192;</a></td>\n'
+            f'</tr>')
 
-# ── Source health pills ───────────────────────────────────────────────────────
+# ── Health pills ──────────────────────────────────────────────────────────────
 
 def _health_pills(health: list) -> str:
     out = []
     for s in health:
         cls = {"ok": "pill-ok", "stale": "pill-stale", "error": "pill-error"}.get(s["status"], "pill-unknown")
-        out.append(f'<span class="health-pill {cls}" title="{_h(s["name"])}: {_h(s["age"])}">'
-                   f'{_h(s["name"])} <span class="pill-age">{_h(s["age"])}</span></span>')
+        out.append(f'<span class="health-pill {cls}">{_h(s["name"])} <span class="pill-age">{_h(s["age"])}</span></span>')
     return "\n".join(out)
+
 
 # ── Main generate ─────────────────────────────────────────────────────────────
 
@@ -374,12 +385,11 @@ def generate() -> str:
     init_db()
     with get_conn() as conn:
         d = get_dashboard_data(conn)
-        fmv_scored_list = fmv_engine.score_active_listings(conn)  # list of dicts with .fmv FMVResult
+        fmv_scored_list = fmv_engine.score_active_listings(conn)
 
-        # Build id → fmv lookup from scored list
         fmv_by_id = {}
         for row in fmv_scored_list:
-            fmv_obj = row.get("fmv")  # FMVResult object or None
+            fmv_obj = row.get("fmv")
             if fmv_obj:
                 fmv_by_id[row["id"]] = {
                     "fmv":        getattr(fmv_obj, "weighted_median", None),
@@ -389,7 +399,6 @@ def generate() -> str:
             else:
                 fmv_by_id[row["id"]] = {"fmv": None, "confidence": "NONE", "comp_count": 0}
 
-        # All active listings with FMV scores attached
         active = d["active"]
         def _keep(c):
             if (c.get("dealer") or "").lower() == "holt motorsports": return False
@@ -399,59 +408,47 @@ def generate() -> str:
         for c in active:
             c["_fmv"] = fmv_by_id.get(c["id"], {"fmv": None, "confidence": "NONE", "comp_count": 0})
 
-        # Sort newest first (default view)
-        active_sorted = sorted(active, key=lambda c: c.get("created_at") or c.get("date_first_seen") or "", reverse=True)
+        active_sorted = sorted(active,
+                               key=lambda c: c.get("created_at") or c.get("date_first_seen") or "",
+                               reverse=True)
 
-        # Sold comps — last 24 months
         cutoff = (date.today() - timedelta(days=730)).isoformat()
-        comp_rows = conn.execute("""
-            SELECT * FROM sold_comps
-            WHERE sold_date >= ? AND sold_price IS NOT NULL
-            ORDER BY sold_date DESC
-        """, (cutoff,)).fetchall()
+        comp_rows = conn.execute(
+            "SELECT * FROM sold_comps WHERE sold_date >= ? AND sold_price IS NOT NULL ORDER BY sold_date DESC",
+            (cutoff,)
+        ).fetchall()
         comps = [dict(r) for r in comp_rows]
 
-        # Active auctions only
         auctions = [c for c in active if _is_auction(c.get("dealer", ""))]
 
-        # Stats
-        today = d["today"]
-        new_today   = [c for c in d["new_today"]   if _keep(c)]
-        sold_today  = [c for c in d["sold_today"]  if _keep(c)]
-        sitting_30  = [c for c in active if (c.get("days_on_site") or 0) >= 30]
-        n_active    = len(active)
-        n_new       = len(new_today)
-        n_auctions  = len(auctions)
-        n_comps     = len(comps)
-        n_deals     = sum(1 for c in active if (
-                          c["_fmv"].get("fmv") and c.get("price") and
-                          c["_fmv"]["confidence"] != "NONE" and
-                          float(c["price"]) < float(c["_fmv"]["fmv"]) * 0.95))
+        new_today  = [c for c in d["new_today"]  if _keep(c)]
+        n_active   = len(active)
+        n_new      = len(new_today)
+        n_auctions = len(auctions)
+        n_comps    = len(comps)
+        n_deals    = sum(1 for c in active if (
+                         c["_fmv"].get("fmv") and c.get("price") and
+                         c["_fmv"]["confidence"] != "NONE" and
+                         float(c["price"]) < float(c["_fmv"]["fmv"]) * 0.95))
 
-        # Health
-        health = _source_health()
+        health     = _source_health()
         health_html = _health_pills(health)
-
-        # Build card HTML for all listings (JS will filter/show/hide)
-        all_cards = "\n".join(_card(c, c["_fmv"]) for c in active_sorted)
-
-        # Build auction cards
-        auction_cards = "\n".join(_card(c, c["_fmv"]) for c in sorted(
-            auctions, key=lambda c: c.get("created_at") or c.get("date_first_seen") or "", reverse=True))
-
-        # Build comp rows HTML
+        all_cards  = "\n".join(_card(c, c["_fmv"]) for c in active_sorted)
         comp_rows_html = "\n".join(_comp_row(c) for c in comps)
 
-        # Collect unique values for filter dropdowns (from JS data)
+        # Chip data — unique generations and sources
         generations = sorted(set(_gen(c.get("year"), c.get("model")) for c in active if c.get("year")))
-        models      = sorted(set(c.get("model", "") for c in active if c.get("model")))
-        sources     = sorted(set(c.get("dealer", "") for c in active if c.get("dealer")))
+        sources_raw = sorted(set(
+            _BADGE_CFG.get((c.get("dealer") or "").lower().strip(), (None, None, (c.get("dealer") or "")[:12]))[2]
+            for c in active if c.get("dealer")
+        ))
+        gen_chips_html    = "\n".join(f'<button class="chip" data-val="{_h(g)}" onclick="toggleChip(this,\'gen\')">{_h(g)}</button>' for g in generations)
+        source_chips_html = "\n".join(f'<button class="chip" data-val="{_h(s)}" onclick="toggleChip(this,\'src\')">{_h(s)}</button>' for s in sources_raw)
 
-        gen_opts     = "\n".join(f'<option value="{_h(g)}">{_h(g)}</option>' for g in generations)
-        model_opts   = "\n".join(f'<option value="{_h(m)}">{_h(m)}</option>' for m in models)
-        source_opts  = "\n".join(f'<option value="{_h(s)}">{_h(s)}</option>' for s in sources)
+        # Comp gen options for filter
+        gen_opts = "\n".join(f'<option value="{_h(g)}">{_h(g)}</option>' for g in generations)
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = datetime.now().strftime("%b %d, %Y %H:%M")
 
     # ── HTML ──────────────────────────────────────────────────────────────────
     html = f"""<!DOCTYPE html>
@@ -462,244 +459,330 @@ def generate() -> str:
 <meta http-equiv="refresh" content="180">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="PTracker">
-<meta name="theme-color" content="#0f1117">
+<meta name="apple-mobile-web-app-title" content="PTOX">
+<meta name="theme-color" content="#0A0A0C">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<title>Porsche Tracker</title>
+<title>PTOX11 &mdash; Porsche Market Intelligence</title>
 <style>
-/* ── Reset & Base ── */
-*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
-html,body{{height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;background:#0f1117;color:#e2e8f0}}
-a{{color:inherit;text-decoration:none}}
-button{{cursor:pointer;border:none;background:none;font:inherit;color:inherit}}
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500&display=swap');
+
+:root {{
+  --red:    #D6293E;
+  --bg:     #0A0A0C;
+  --bg2:    #111116;
+  --bg3:    #18181F;
+  --border: #25252E;
+  --text:   #F0F0F8;
+  --muted:  #6B6B7D;
+  --green:  #22C55E;
+  --yellow: #EAB308;
+}}
+
+*,*::before,*::after {{ box-sizing:border-box; margin:0; padding:0; }}
+html,body {{ height:100%; background:var(--bg); color:var(--text); font-family:'DM Sans',sans-serif; font-size:14px; line-height:1.5; }}
+a {{ color:inherit; text-decoration:none; }}
+button {{ cursor:pointer; border:none; background:none; font:inherit; color:inherit; }}
 
 /* ── Layout ── */
-.app{{display:flex;flex-direction:column;height:100vh;overflow:hidden}}
-.topbar{{
-  height:52px;min-height:52px;
-  background:#161b27;border-bottom:1px solid #2d3748;
-  display:flex;align-items:center;justify-content:space-between;
-  padding:0 20px;gap:16px;z-index:50;
-}}
-.topbar-left{{display:flex;align-items:center;gap:20px}}
-.logo{{font-size:1.05em;font-weight:700;color:#f1f5f9;letter-spacing:-0.3px;white-space:nowrap}}
-.logo span{{color:#ef4444}}
-.nav-tabs{{display:flex;gap:2px}}
-.nav-tab{{
-  padding:6px 14px;border-radius:6px;font-size:0.88em;font-weight:500;
-  color:#94a3b8;transition:all .15s;cursor:pointer;
-}}
-.nav-tab:hover{{background:#2d3748;color:#f1f5f9}}
-.nav-tab.active{{background:#3b82f6;color:#fff}}
-.topbar-right{{display:flex;align-items:center;gap:12px;font-size:0.78em;color:#475569;white-space:nowrap}}
-.health-pills{{display:flex;gap:6px;flex-wrap:nowrap}}
-.health-pill{{
-  padding:3px 8px;border-radius:10px;font-size:0.78em;font-weight:500;
-  display:inline-flex;align-items:center;gap:5px;white-space:nowrap;
-}}
-.pill-ok     {{background:#14532d;color:#4ade80}}
-.pill-stale  {{background:#713f12;color:#fbbf24}}
-.pill-error  {{background:#7f1d1d;color:#fca5a5}}
-.pill-unknown{{background:#1e293b;color:#64748b}}
-.pill-age{{font-weight:400;opacity:0.75}}
+.app {{ display:flex; flex-direction:column; height:100vh; overflow:hidden; }}
 
-.body-area{{display:flex;flex:1;overflow:hidden}}
-
-/* ── Sidebar ── */
-.sidebar{{
-  width:220px;min-width:220px;
-  background:#161b27;border-right:1px solid #2d3748;
-  display:flex;flex-direction:column;overflow-y:auto;
-  padding:16px 12px;gap:0;
+/* ── Topbar / Nav ── */
+.topbar {{
+  height:52px; min-height:52px;
+  background:#0C0C12; border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 24px; gap:16px; z-index:50;
 }}
-.sidebar-section{{margin-bottom:20px}}
-.sidebar-label{{
-  font-size:0.7em;font-weight:700;text-transform:uppercase;
-  letter-spacing:.8px;color:#475569;margin-bottom:8px;
+.topbar-left {{ display:flex; align-items:center; gap:4px; }}
+.logo {{
+  font-family:'Syne',sans-serif; font-size:14px; font-weight:800;
+  color:var(--text); letter-spacing:2px; margin-right:20px; white-space:nowrap;
 }}
-.filter-group{{margin-bottom:12px}}
-.filter-group label{{font-size:0.8em;color:#94a3b8;font-weight:500;display:block;margin-bottom:4px}}
-.filter-group select{{
-  width:100%;padding:6px 8px;border:1px solid #2d3748;border-radius:6px;
-  font-size:0.82em;color:#e2e8f0;background:#1e2535;outline:none;
+.logo span {{ color:var(--red); }}
+.nav-item {{
+  font-family:'DM Mono',monospace; font-size:11px; font-weight:500;
+  letter-spacing:0.5px; text-transform:uppercase;
+  color:var(--muted); padding:0 14px; height:52px;
+  display:flex; align-items:center; gap:0;
+  border-bottom:2px solid transparent; transition:all 0.1s;
+  cursor:pointer;
 }}
-.filter-group select:focus{{border-color:#3b82f6}}
-.filter-range{{display:flex;gap:6px}}
-.filter-range input{{
-  width:100%;padding:5px 7px;border:1px solid #2d3748;border-radius:6px;
-  font-size:0.82em;color:#e2e8f0;background:#1e2535;outline:none;
-}}
-.filter-range input:focus{{border-color:#3b82f6}}
-.filter-range input::placeholder{{color:#475569}}
-.filter-checkboxes{{display:flex;flex-direction:column;gap:5px}}
-.filter-checkboxes label{{
-  display:flex;align-items:center;gap:7px;font-size:0.82em;
-  color:#94a3b8;cursor:pointer;
-}}
-.filter-checkboxes input[type=checkbox]{{width:14px;height:14px;cursor:pointer;accent-color:#3b82f6}}
-.reset-btn{{
-  width:100%;padding:7px;border-radius:6px;
-  background:#1e2535;color:#94a3b8;font-size:0.82em;font-weight:500;
-  border:1px solid #2d3748;transition:all .15s;
-}}
-.reset-btn:hover{{background:#2d3748;color:#f1f5f9}}
-
-/* ── Main content ── */
-.main{{flex:1;display:flex;flex-direction:column;overflow:hidden}}
-.main-header{{
-  padding:14px 20px 12px;background:#161b27;border-bottom:1px solid #2d3748;
-  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
-}}
-.stats-row{{display:flex;gap:20px;flex-wrap:wrap}}
-.stat-item{{display:flex;flex-direction:column;gap:1px}}
-.stat-val{{font-size:1.5em;font-weight:700;line-height:1;color:#f1f5f9}}
-.stat-val.green{{color:#4ade80}}
-.stat-val.red  {{color:#f87171}}
-.stat-val.blue {{color:#60a5fa}}
-.stat-lbl{{font-size:0.72em;color:#475569;text-transform:uppercase;letter-spacing:.5px}}
-.search-wrap{{position:relative}}
-.search-input{{
-  padding:7px 12px 7px 32px;border:1px solid #2d3748;border-radius:8px;
-  font-size:0.88em;width:220px;outline:none;background:#1e2535;color:#e2e8f0;
-}}
-.search-input::placeholder{{color:#475569}}
-.search-input:focus{{border-color:#3b82f6;background:#1e2535}}
-.search-icon{{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#475569;font-size:1em}}
-.results-count{{font-size:0.82em;color:#475569}}
-
-.content-area{{flex:1;overflow-y:auto;padding:16px 20px;background:#0f1117}}
-
-/* ── Cards grid ── */
-.cards-grid{{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(270px,1fr));
-  gap:14px;
-}}
-.card{{
-  background:#161b27;border:1px solid #2d3748;border-radius:10px;
-  overflow:hidden;cursor:pointer;transition:box-shadow .15s,transform .15s,border-color .15s;
-}}
-.card:hover{{box-shadow:0 4px 24px rgba(0,0,0,.4);transform:translateY(-2px);border-color:#3b82f6}}
-.card-img-wrap{{width:100%;height:165px;overflow:hidden;background:#1e2535}}
-.card-img{{width:100%;height:165px;object-fit:cover;display:block;transition:transform .2s}}
-.card:hover .card-img{{transform:scale(1.02)}}
-.img-fallback{{opacity:0.6}}
-.card-body{{padding:11px 13px 13px}}
-.card-top-row{{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}}
-.card-age{{font-size:0.72em;color:#475569;white-space:nowrap}}
-.card-title{{font-size:0.92em;font-weight:600;color:#f1f5f9;margin-bottom:4px;line-height:1.3}}
-.tier-badge{{
-  display:inline-block;font-size:0.68em;font-weight:700;
-  background:#451a03;color:#fbbf24;padding:2px 7px;border-radius:4px;
-  margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px;
-  border:1px solid #78350f;
-}}
-.card-price-row{{display:flex;align-items:baseline;gap:6px;margin-bottom:5px;flex-wrap:wrap}}
-.price-label{{font-size:0.72em;color:#64748b}}
-.price-ask    {{font-size:1.2em;font-weight:700;color:#f1f5f9}}
-.price-auction{{font-size:1.2em;font-weight:700;color:#a78bfa}}
-.card-meta{{font-size:0.75em;color:#475569;margin-top:4px}}
-.days-stale{{color:#f87171}}
-.auction-ends{{font-size:0.75em;color:#94a3b8;margin-top:3px}}
-.countdown{{font-weight:600;color:#fb923c}}
-
-/* ── FMV line ── */
-.fmv-line{{
-  font-size:0.78em;padding:5px 8px;border-radius:5px;margin-bottom:5px;
-  line-height:1.4;
-}}
-.fmv-val{{font-weight:700;font-size:1.05em}}
-.fmv-comps{{opacity:0.65}}
-.fmv-none  {{background:#1e2535;color:#475569}}
-.fmv-neutral{{background:#1e2535;color:#94a3b8}}
-.fmv-great {{background:#14532d;color:#86efac}}
-.fmv-good  {{background:#14532d;color:#4ade80}}
-.fmv-mid   {{background:#431407;color:#fdba74}}
-.fmv-high  {{background:#450a0a;color:#fca5a5}}
-
-/* ── Delta badges ── */
-.delta{{
-  font-size:0.72em;font-weight:700;padding:2px 6px;border-radius:5px;
+.nav-item:hover {{ color:var(--text); }}
+.nav-item.active {{ color:var(--text); border-bottom-color:var(--red); }}
+.topbar-right {{
+  display:flex; align-items:center; gap:12px;
+  font-family:'DM Mono',monospace; font-size:10px; color:var(--muted);
   white-space:nowrap;
 }}
-.delta-great{{background:#14532d;color:#4ade80}}
-.delta-good {{background:#14532d;color:#86efac}}
-.delta-flat {{background:#1e2535;color:#64748b}}
-.delta-mid  {{background:#431407;color:#fdba74}}
-.delta-high {{background:#450a0a;color:#fca5a5}}
-
-/* ── Source badge ── */
-.badge{{
-  font-size:0.72em;font-weight:600;padding:2px 7px;border-radius:8px;
-  display:inline-block;white-space:nowrap;
+.health-pills {{ display:flex; gap:6px; flex-wrap:nowrap; }}
+.health-pill {{
+  padding:3px 8px; border-radius:3px; font-family:'DM Mono',monospace;
+  font-size:10px; font-weight:500; display:inline-flex; align-items:center; gap:4px;
 }}
+.pill-ok     {{ background:#052210; color:#22C55E; }}
+.pill-stale  {{ background:#1F1400; color:#EAB308; }}
+.pill-error  {{ background:#200508; color:var(--red); }}
+.pill-unknown{{ background:var(--bg3); color:var(--muted); }}
+.pill-age {{ font-weight:400; opacity:0.7; }}
+
+.body-area {{ display:flex; flex:1; overflow:hidden; }}
+
+/* ── Sidebar ── */
+.sidebar {{
+  width:220px; min-width:220px;
+  background:#0C0C12; border-right:1px solid var(--border);
+  display:flex; flex-direction:column; overflow-y:auto;
+  padding:20px 14px; gap:0;
+}}
+.sidebar-label {{
+  font-family:'DM Mono',monospace; font-size:9px; font-weight:500;
+  letter-spacing:1.5px; text-transform:uppercase;
+  color:var(--muted); margin-bottom:10px;
+}}
+.filter-group {{ margin-bottom:20px; }}
+.filter-group-label {{
+  font-family:'DM Mono',monospace; font-size:9px; letter-spacing:1.5px;
+  text-transform:uppercase; color:var(--muted); margin-bottom:8px; display:block;
+}}
+.chip-row {{ display:flex; flex-wrap:wrap; gap:5px; }}
+.chip {{
+  font-family:'DM Mono',monospace; font-size:10px;
+  background:var(--bg3); border:1px solid var(--border);
+  color:#8888A0; padding:4px 9px; border-radius:20px;
+  cursor:pointer; transition:all 0.1s;
+}}
+.chip:hover {{ color:var(--text); border-color:var(--muted); }}
+.chip.active {{
+  background:#1A0810; border-color:var(--red); color:var(--red);
+}}
+.filter-range {{ display:flex; gap:6px; }}
+.filter-range input {{
+  width:100%; padding:6px 8px; border:1px solid var(--border); border-radius:4px;
+  font-family:'DM Mono',monospace; font-size:10px; color:var(--text);
+  background:var(--bg3); outline:none;
+}}
+.filter-range input:focus {{ border-color:var(--red); }}
+.filter-range input::placeholder {{ color:var(--muted); }}
+.filter-checkboxes {{ display:flex; flex-direction:column; gap:6px; }}
+.filter-checkboxes label {{
+  display:flex; align-items:center; gap:7px;
+  font-family:'DM Mono',monospace; font-size:10px; color:var(--muted); cursor:pointer;
+}}
+.filter-checkboxes input[type=checkbox] {{ width:13px; height:13px; accent-color:var(--red); }}
+.reset-btn {{
+  width:100%; padding:7px; border-radius:4px;
+  background:var(--bg3); color:var(--muted);
+  font-family:'DM Mono',monospace; font-size:10px; font-weight:500;
+  border:1px solid var(--border); transition:all 0.1s; margin-top:4px;
+}}
+.reset-btn:hover {{ color:var(--text); border-color:var(--muted); }}
+
+/* ── Main content ── */
+.main {{ flex:1; display:flex; flex-direction:column; overflow:hidden; }}
+
+/* ── Stats strip ── */
+.stats-strip {{
+  display:flex; gap:1px; background:var(--border);
+  border-bottom:1px solid var(--border);
+}}
+.stat-cell {{
+  flex:1; background:var(--bg2); padding:12px 16px; text-align:center;
+}}
+.stat-num {{
+  font-family:'DM Mono',monospace; font-size:20px; font-weight:500;
+  color:var(--text); letter-spacing:-1px; line-height:1;
+}}
+.stat-num.green  {{ color:var(--green); }}
+.stat-num.yellow {{ color:var(--yellow); }}
+.stat-lbl {{
+  font-family:'DM Mono',monospace; font-size:9px; color:var(--muted);
+  margin-top:4px; text-transform:uppercase; letter-spacing:0.5px;
+}}
+
+.main-toolbar {{
+  padding:10px 20px; background:var(--bg2); border-bottom:1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+}}
+.search-wrap {{ position:relative; }}
+.search-input {{
+  padding:7px 12px 7px 30px; border:1px solid var(--border); border-radius:4px;
+  font-family:'DM Mono',monospace; font-size:11px; width:220px;
+  outline:none; background:var(--bg3); color:var(--text);
+}}
+.search-input::placeholder {{ color:var(--muted); }}
+.search-input:focus {{ border-color:var(--red); }}
+.search-icon {{ position:absolute; left:9px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:12px; }}
+.results-count {{
+  font-family:'DM Mono',monospace; font-size:10px; color:var(--muted);
+}}
+
+.content-area {{ flex:1; overflow-y:auto; padding:20px; background:var(--bg); }}
+
+/* ── Cards grid ── */
+.cards-grid {{
+  display:grid;
+  grid-template-columns:repeat(auto-fill, minmax(270px,1fr));
+  gap:12px;
+}}
+.card {{
+  background:var(--bg2); border:1px solid var(--border); border-radius:6px;
+  overflow:hidden; cursor:pointer;
+  transition:border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}}
+.card:hover {{
+  border-color:var(--red); transform:translateY(-2px);
+  box-shadow:0 4px 20px rgba(214,41,62,0.12);
+}}
+.card-img-wrap {{ position:relative; height:165px; overflow:hidden; background:var(--bg3); }}
+.card-img {{ width:100%; height:165px; object-fit:cover; display:block; transition:transform 0.2s; opacity:0.92; }}
+.card:hover .card-img {{ transform:scale(1.03); }}
+.img-gen-badge {{
+  position:absolute; top:8px; left:8px;
+  background:rgba(0,0,0,0.72); backdrop-filter:blur(4px);
+  font-family:'DM Mono',monospace; font-size:9px; color:#9090A8;
+  padding:3px 7px; border-radius:3px; letter-spacing:0.5px;
+}}
+.img-deal-badge {{
+  position:absolute; top:8px; right:8px;
+  background:var(--red); color:#fff;
+  font-family:'DM Mono',monospace; font-size:10px; font-weight:500;
+  padding:3px 7px; border-radius:3px; letter-spacing:0.5px;
+}}
+.card-body {{ padding:11px 12px 12px; }}
+.card-top-row {{
+  display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;
+}}
+.card-age {{ font-family:'DM Mono',monospace; font-size:9px; color:#4B4B5D; }}
+.card-title {{
+  font-family:'DM Sans',sans-serif; font-size:12px; font-weight:500;
+  color:#D0D0E0; margin-bottom:4px; line-height:1.35;
+}}
+.tier-badge {{
+  display:inline-block; font-family:'DM Mono',monospace; font-size:9px; font-weight:500;
+  background:#1A0A00; color:var(--yellow); padding:2px 7px; border-radius:3px;
+  margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;
+  border:1px solid #3A2000;
+}}
+.card-price-row {{
+  display:flex; align-items:baseline; gap:6px; margin-bottom:8px;
+}}
+.price-lbl {{ font-family:'DM Mono',monospace; font-size:9px; color:var(--muted); }}
+.price-ask    {{ font-family:'DM Mono',monospace; font-size:16px; font-weight:500; color:#fff; letter-spacing:-0.5px; }}
+.price-auction{{ font-family:'DM Mono',monospace; font-size:16px; font-weight:500; color:#A78BFA; letter-spacing:-0.5px; }}
+
+/* ── FMV bar ── */
+.fmv-block {{ margin-bottom:7px; }}
+.fmv-top-row {{ display:flex; justify-content:space-between; font-family:'DM Mono',monospace; font-size:9px; margin-bottom:5px; }}
+.fmv-label {{ color:var(--muted); }}
+.fmv-delta-txt {{ font-weight:500; }}
+.fmv-delta-txt.bar-great {{ color:var(--green); }}
+.fmv-delta-txt.bar-good  {{ color:#86EFAC; }}
+.fmv-delta-txt.bar-neutral{{ color:var(--muted); }}
+.fmv-delta-txt.bar-mid   {{ color:var(--yellow); }}
+.fmv-delta-txt.bar-high  {{ color:#F87171; }}
+.fmv-bar-wrap {{
+  background:#1E1E28; height:4px; border-radius:2px;
+  position:relative; overflow:hidden; margin-bottom:5px;
+}}
+.fmv-bar-fill {{ height:100%; border-radius:2px; transition:width 0.3s; }}
+.fmv-bar-fill.bar-great {{ background:var(--green); }}
+.fmv-bar-fill.bar-good  {{ background:#86EFAC; }}
+.fmv-bar-fill.bar-neutral{{ background:var(--muted); }}
+.fmv-bar-fill.bar-mid   {{ background:var(--yellow); }}
+.fmv-bar-fill.bar-high  {{ background:#F87171; }}
+.fmv-bar-midline {{
+  position:absolute; left:50%; top:0; bottom:0;
+  width:1px; background:rgba(255,255,255,0.12);
+}}
+.fmv-bottom-row {{ display:flex; justify-content:space-between; font-family:'DM Mono',monospace; font-size:9px; }}
+.fmv-val-txt {{ color:var(--muted); }}
+.fmv-comps-txt {{ color:#3B3B4D; }}
+.fmv-none {{
+  display:flex; align-items:center; gap:5px;
+  font-family:'DM Mono',monospace; font-size:9px; color:#3B3B4D; margin-bottom:7px;
+}}
+.fmv-none-dot {{ width:5px; height:5px; border-radius:50%; background:var(--border); flex-shrink:0; }}
+
+.auction-ends {{
+  font-family:'DM Mono',monospace; font-size:10px; color:var(--muted); margin-bottom:5px;
+}}
+.countdown {{ color:var(--red); font-weight:500; }}
+.card-meta {{ font-family:'DM Mono',monospace; font-size:9px; color:#4B4B5D; }}
+.days-stale {{ color:#F87171; }}
+.badge {{ font-family:'DM Mono',monospace; font-size:9px; font-weight:500; padding:2px 6px; border-radius:3px; display:inline-block; }}
 
 /* ── Table view (comps) ── */
-.tbl-wrap{{overflow-x:auto;background:#161b27;border:1px solid #2d3748;border-radius:10px}}
-.tbl{{width:100%;border-collapse:collapse;font-size:0.84em}}
-.tbl thead tr{{background:#1e2535;border-bottom:2px solid #2d3748}}
-.tbl th{{
-  padding:9px 10px;text-align:left;font-weight:600;
-  color:#475569;font-size:0.78em;text-transform:uppercase;
-  letter-spacing:.5px;white-space:nowrap;cursor:pointer;user-select:none;
+.tbl-wrap {{ overflow-x:auto; background:var(--bg2); border:1px solid var(--border); border-radius:6px; }}
+.tbl {{ width:100%; border-collapse:collapse; font-family:'DM Mono',monospace; font-size:11px; }}
+.tbl thead tr {{ background:var(--bg3); border-bottom:1px solid var(--border); }}
+.tbl th {{
+  padding:9px 10px; text-align:left; font-weight:500;
+  color:var(--muted); font-size:9px; text-transform:uppercase;
+  letter-spacing:0.5px; white-space:nowrap; cursor:pointer; user-select:none;
 }}
-.tbl th:hover{{color:#e2e8f0}}
-.tbl td{{padding:8px 10px;border-bottom:1px solid #1e2535;vertical-align:middle;color:#cbd5e1}}
-.tbl tbody tr:hover{{background:#1e2535}}
-.tbl tbody tr:last-child td{{border-bottom:none}}
-.td-price{{font-weight:600;text-align:right;color:#f1f5f9}}
-.td-model{{max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.tbl-link{{color:#475569;font-size:1.1em;padding:2px 6px;border-radius:4px;transition:all .15s}}
-.tbl-link:hover{{color:#60a5fa;background:#1e2535}}
+.tbl th:hover {{ color:var(--text); }}
+.tbl td {{ padding:8px 10px; border-bottom:1px solid #1A1A22; vertical-align:middle; color:#B0B0C0; }}
+.tbl tbody tr:hover {{ background:var(--bg3); }}
+.tbl tbody tr:last-child td {{ border-bottom:none; }}
+.td-price {{ font-weight:500; text-align:right; color:var(--text); }}
+.td-model {{ max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+.tbl-link {{ color:var(--muted); padding:2px 6px; border-radius:3px; transition:all 0.1s; }}
+.tbl-link:hover {{ color:var(--text); background:var(--bg3); }}
 
 /* ── Empty state ── */
-.empty{{grid-column:1/-1;text-align:center;padding:80px 20px;color:#475569}}
-.empty-icon{{font-size:3em;margin-bottom:12px}}
-.empty-text{{font-size:1em;font-weight:500;color:#64748b}}
-.empty-sub{{font-size:0.85em;margin-top:6px;color:#334155}}
+.empty {{ grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--muted); }}
+.empty-icon {{ font-size:2.5em; margin-bottom:10px; }}
+.empty-text {{ font-family:'DM Mono',monospace; font-size:12px; color:var(--muted); }}
 
 /* ── View panels ── */
-.view{{display:none}}
-.view.active{{display:block}}
+.view {{ display:none; }}
+.view.active {{ display:block; }}
 
 /* ── Section header ── */
-.section-header{{
-  display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:14px;flex-wrap:wrap;gap:8px;
+.section-header {{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:14px; flex-wrap:wrap; gap:8px;
 }}
-.section-title{{font-size:1em;font-weight:700;color:#f1f5f9}}
-.section-sub{{font-size:0.8em;color:#475569;margin-top:2px}}
+.section-title {{
+  font-family:'Syne',sans-serif; font-size:15px; font-weight:700; color:var(--text);
+}}
+.section-sub {{ font-family:'DM Mono',monospace; font-size:10px; color:var(--muted); margin-top:2px; }}
+
+/* ── Market report cards ── */
+.report-card {{
+  background:var(--bg2); border:1px solid var(--border); border-radius:6px;
+  padding:20px; display:block; transition:border-color 0.1s; color:var(--text);
+}}
+.report-card:hover {{ border-color:var(--red); }}
+.report-icon {{ font-size:1.4em; margin-bottom:8px; }}
+.report-title {{ font-family:'Syne',sans-serif; font-size:14px; font-weight:700; margin-bottom:4px; }}
+.report-sub {{ font-family:'DM Mono',monospace; font-size:10px; color:var(--muted); }}
 
 /* ── Scrollbar ── */
-::-webkit-scrollbar{{width:6px;height:6px}}
-::-webkit-scrollbar-track{{background:#0f1117}}
-::-webkit-scrollbar-thumb{{background:#2d3748;border-radius:3px}}
-::-webkit-scrollbar-thumb:hover{{background:#3b4a5e}}
+::-webkit-scrollbar {{ width:5px; height:5px; }}
+::-webkit-scrollbar-track {{ background:var(--bg); }}
+::-webkit-scrollbar-thumb {{ background:var(--border); border-radius:3px; }}
+::-webkit-scrollbar-thumb:hover {{ background:var(--muted); }}
 
-/* ── Responsive ── */
-@media(max-width:768px){{
-  .sidebar{{display:none}}
-  .topbar-right{{display:none}}
-  .stats-row{{gap:12px}}
-  .search-input{{width:160px}}
+@media(max-width:768px) {{
+  .sidebar {{ display:none; }}
+  .topbar-right {{ display:none; }}
 }}
 </style>
 </head>
 <body>
 <div class="app">
 
-<!-- ── Top bar ── -->
+<!-- ── Nav ── -->
 <header class="topbar">
   <div class="topbar-left">
-    <div class="logo">🏎 Porsche <span>Tracker</span></div>
-    <nav class="nav-tabs">
-      <button class="nav-tab active" onclick="switchView('listings')">New Listings</button>
-      <a class="nav-tab" href="auctions.html" style="text-decoration:none">🔨 Auctions</a>
-      <button class="nav-tab" onclick="switchView('comps')">Sold Comps</button>
-      <button class="nav-tab" onclick="switchView('market')">Market Reports</button>
-      <a class="nav-tab" href="search.html" style="text-decoration:none">🔍 Search</a>
-    </nav>
+    <div class="logo">PTO<span>X</span></div>
+    <button class="nav-item active" onclick="switchView('listings',this)">Listings</button>
+    <a class="nav-item" href="auctions.html">Auctions</a>
+    <button class="nav-item" onclick="switchView('comps',this)">Comps</button>
+    <button class="nav-item" onclick="switchView('market',this)">Market</button>
+    <a class="nav-item" href="search.html">Search</a>
   </div>
   <div class="topbar-right">
     <div class="health-pills">{health_html}</div>
@@ -711,147 +794,111 @@ button{{cursor:pointer;border:none;background:none;font:inherit;color:inherit}}
 
 <!-- ── Sidebar ── -->
 <aside class="sidebar">
-  <div class="sidebar-section">
-    <div class="sidebar-label">Filters</div>
-
-    <div class="filter-group">
-      <label>Generation</label>
-      <select id="f-gen" onchange="applyFilters()">
-        <option value="">All Generations</option>
-        {gen_opts}
-      </select>
-    </div>
-
-    <div class="filter-group">
-      <label>Model</label>
-      <select id="f-model" onchange="applyFilters()">
-        <option value="">All Models</option>
-        {model_opts}
-      </select>
-    </div>
-
-    <div class="filter-group">
-      <label>Year Range</label>
-      <div class="filter-range">
-        <input type="number" id="f-year-min" placeholder="From" min="1984" max="2025" onchange="applyFilters()">
-        <input type="number" id="f-year-max" placeholder="To"   min="1984" max="2025" onchange="applyFilters()">
-      </div>
-    </div>
-
-    <div class="filter-group">
-      <label>Price Range ($)</label>
-      <div class="filter-range">
-        <input type="number" id="f-price-min" placeholder="Min" onchange="applyFilters()">
-        <input type="number" id="f-price-max" placeholder="Max" onchange="applyFilters()">
-      </div>
-    </div>
-
-    <div class="filter-group">
-      <label>Source</label>
-      <select id="f-source" onchange="applyFilters()">
-        <option value="">All Sources</option>
-        {source_opts}
-      </select>
-    </div>
-
-    <div class="filter-group">
-      <label>Type</label>
-      <div class="filter-checkboxes">
-
-        <label><input type="checkbox" id="f-deals" onchange="applyFilters()"> Deals only (↓5%+ FMV)</label>
-        <label><input type="checkbox" id="f-tier1" onchange="applyFilters()"> GT/Collector only</label>
-      </div>
-    </div>
-
-    <button class="reset-btn" onclick="resetFilters()">↺ Reset Filters</button>
-  </div>
-
-  <div class="sidebar-section">
-    <div class="sidebar-label">Quick Links</div>
-    <div style="display:flex;flex-direction:column;gap:6px">
-      <a href="dashboard.html" style="font-size:0.82em;color:#64748b;padding:4px 6px;border-radius:5px;transition:all .15s" onmouseover="this.style.background='#1e2535';this.style.color='#e2e8f0'" onmouseout="this.style.background='';this.style.color='#64748b'">← Classic Dashboard</a>
-      <a href="live_feed.html" style="font-size:0.82em;color:#64748b;padding:4px 6px;border-radius:5px;transition:all .15s" onmouseover="this.style.background='#1e2535';this.style.color='#e2e8f0'" onmouseout="this.style.background='';this.style.color='#64748b'">Live Feed</a>
-      <a href="market_report.html" style="font-size:0.82em;color:#64748b;padding:4px 6px;border-radius:5px;transition:all .15s" onmouseover="this.style.background='#1e2535';this.style.color='#e2e8f0'" onmouseout="this.style.background='';this.style.color='#64748b'">Market Report</a>
-      <a href="daily_report.html" style="font-size:0.82em;color:#64748b;padding:4px 6px;border-radius:5px;transition:all .15s" onmouseover="this.style.background='#1e2535';this.style.color='#e2e8f0'" onmouseout="this.style.background='';this.style.color='#64748b'">Daily Auctions</a>
+  <div class="filter-group">
+    <span class="filter-group-label">Generation</span>
+    <div class="chip-row" id="gen-chips">
+      {gen_chips_html}
     </div>
   </div>
+
+  <div class="filter-group">
+    <span class="filter-group-label">Source</span>
+    <div class="chip-row" id="src-chips">
+      {source_chips_html}
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-group-label">Year</span>
+    <div class="filter-range">
+      <input type="number" id="f-year-min" placeholder="From" min="1984" max="2025" oninput="applyFilters()">
+      <input type="number" id="f-year-max" placeholder="To"   min="1984" max="2025" oninput="applyFilters()">
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-group-label">Price ($)</span>
+    <div class="filter-range">
+      <input type="number" id="f-price-min" placeholder="Min" oninput="applyFilters()">
+      <input type="number" id="f-price-max" placeholder="Max" oninput="applyFilters()">
+    </div>
+  </div>
+
+  <div class="filter-group">
+    <span class="filter-group-label">Type</span>
+    <div class="filter-checkboxes">
+      <label><input type="checkbox" id="f-deals" onchange="applyFilters()"> Deals only (&darr;5%+ FMV)</label>
+      <label><input type="checkbox" id="f-tier1" onchange="applyFilters()"> GT / Collector</label>
+    </div>
+  </div>
+
+  <button class="reset-btn" onclick="resetFilters()">&#x21BA; Reset Filters</button>
 </aside>
 
 <!-- ── Main ── -->
 <main class="main">
-  <div class="main-header">
-    <div class="stats-row">
-      <div class="stat-item">
-        <span class="stat-val">{n_active}</span>
-        <span class="stat-lbl">Active</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-val green">{n_new}</span>
-        <span class="stat-lbl">New Today</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-val blue">{n_auctions}</span>
-        <span class="stat-lbl">Auctions</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-val">{n_comps:,}</span>
-        <span class="stat-lbl">Sold Comps</span>
-      </div>
-      <div class="stat-item">
-        <span class="stat-val green">{n_deals}</span>
-        <span class="stat-lbl">Deals</span>
-      </div>
+
+  <!-- Stats strip -->
+  <div class="stats-strip">
+    <div class="stat-cell">
+      <div class="stat-num">{n_active:,}</div>
+      <div class="stat-lbl">Active</div>
     </div>
-    <div style="display:flex;align-items:center;gap:10px">
-      <div class="search-wrap">
-        <span class="search-icon">🔍</span>
-        <input class="search-input" type="text" id="search-box" placeholder="Search year, model, trim…" oninput="applyFilters()">
-      </div>
-      <span class="results-count" id="results-count"></span>
+    <div class="stat-cell">
+      <div class="stat-num">{n_new:,}</div>
+      <div class="stat-lbl">New Today</div>
     </div>
+    <div class="stat-cell">
+      <div class="stat-num yellow">{n_auctions}</div>
+      <div class="stat-lbl">Auctions</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-num">{n_comps:,}</div>
+      <div class="stat-lbl">Comps</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-num green">{n_deals}</div>
+      <div class="stat-lbl">Deals</div>
+    </div>
+  </div>
+
+  <!-- Toolbar -->
+  <div class="main-toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">&#x1F50D;</span>
+      <input class="search-input" type="text" id="search-box" placeholder="Year, model, trim&hellip;" oninput="applyFilters()">
+    </div>
+    <span class="results-count" id="results-count"></span>
   </div>
 
   <div class="content-area">
 
-    <!-- ── View: New Listings ── -->
+    <!-- ── View: Listings ── -->
     <div class="view active" id="view-listings">
       <div class="section-header">
         <div>
           <div class="section-title">All Active Listings</div>
-          <div class="section-sub">Newest first · All sources blended · Filters apply</div>
+          <div class="section-sub">Newest first &middot; All 10 sources &middot; Filters apply</div>
         </div>
       </div>
       <div class="cards-grid" id="cards-grid">
-        {all_cards if all_cards else '<div class="empty"><div class="empty-icon">📭</div><div class="empty-text">No listings found</div></div>'}
+        {all_cards if all_cards else '<div class="empty"><div class="empty-icon">&#x1F4ED;</div><div class="empty-text">No listings found</div></div>'}
       </div>
     </div>
 
-    <!-- ── View: Auctions ── -->
-    <div class="view" id="view-auctions">
-      <div class="section-header">
-        <div>
-          <div class="section-title">Active Auctions</div>
-          <div class="section-sub">BaT · pcarmarket · Cars &amp; Bids · classic.com — live bidding</div>
-        </div>
-      </div>
-      <div class="cards-grid" id="auction-grid">
-        {auction_cards if auction_cards else '<div class="empty"><div class="empty-icon">🔨</div><div class="empty-text">No active auctions</div><div class="empty-sub">Check back soon — BaT and pcarmarket are scraped every 45 min</div></div>'}
-      </div>
-    </div>
-
-    <!-- ── View: Sold Comps ── -->
+    <!-- ── View: Comps ── -->
     <div class="view" id="view-comps">
       <div class="section-header">
         <div>
           <div class="section-title">Sold Comps</div>
-          <div class="section-sub">24-month rolling · BaT, pcarmarket, Cars &amp; Bids, classic.com · {n_comps:,} records</div>
+          <div class="section-sub">24-month rolling &middot; BaT, pcarmarket, C&amp;B &middot; {n_comps:,} records</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
-          <input type="text" id="comp-search" placeholder="Filter comps…"
-            style="padding:6px 10px;border:1px solid #2d3748;border-radius:6px;font-size:0.82em;outline:none;width:180px;background:#1e2535;color:#e2e8f0"
+          <input type="text" id="comp-search" placeholder="Filter comps&hellip;"
+            style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:10px;outline:none;width:180px;background:var(--bg3);color:var(--text)"
             oninput="filterComps()">
           <select id="comp-gen-filter"
-            style="padding:6px 8px;border:1px solid #2d3748;border-radius:6px;font-size:0.82em;outline:none;background:#1e2535;color:#e2e8f0"
+            style="padding:6px 8px;border:1px solid var(--border);border-radius:4px;font-family:'DM Mono',monospace;font-size:10px;outline:none;background:var(--bg3);color:var(--text)"
             onchange="filterComps()">
             <option value="">All Gens</option>
             {gen_opts}
@@ -863,13 +910,13 @@ button{{cursor:pointer;border:none;background:none;font:inherit;color:inherit}}
           <thead>
             <tr>
               <th>Source</th>
-              <th onclick="sortComps('year')">Year ↕</th>
+              <th onclick="sortComps('year')">Year &updownarrow;</th>
               <th>Model</th>
-              <th onclick="sortComps('gen')">Gen ↕</th>
+              <th onclick="sortComps('gen')">Gen &updownarrow;</th>
               <th>Trans</th>
-              <th onclick="sortComps('mileage')">Miles ↕</th>
-              <th onclick="sortComps('price')" style="text-align:right">Sold $ ↕</th>
-              <th onclick="sortComps('date')">Date ↕</th>
+              <th onclick="sortComps('mileage')">Miles &updownarrow;</th>
+              <th onclick="sortComps('price')" style="text-align:right">Sold $ &updownarrow;</th>
+              <th onclick="sortComps('date')">Date &updownarrow;</th>
               <th></th>
             </tr>
           </thead>
@@ -880,37 +927,34 @@ button{{cursor:pointer;border:none;background:none;font:inherit;color:inherit}}
       </div>
     </div>
 
-    <!-- ── View: Market Reports ── -->
+    <!-- ── View: Market ── -->
     <div class="view" id="view-market">
       <div class="section-header">
-        <div class="section-title">Market Reports</div>
-        <div class="section-sub">Generated reports — open in browser</div>
+        <div>
+          <div class="section-title">Market Reports</div>
+          <div class="section-sub">Generated reports</div>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px">
-        <a href="market_report.html" class="report-card" style="background:#161b27;border:1px solid #2d3748;border-radius:10px;padding:20px;display:block;transition:border-color .15s;color:#e2e8f0" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#2d3748'">
-          <div style="font-size:1.5em;margin-bottom:8px">📊</div>
-          <div style="font-weight:600;margin-bottom:4px">Market Analysis Report</div>
-          <div style="font-size:0.82em;color:#475569">Full price analysis, FMV distribution, segment breakdown</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+        <a href="market_report.html" class="report-card">
+          <div class="report-icon">&#x1F4CA;</div>
+          <div class="report-title">Market Analysis</div>
+          <div class="report-sub">FMV distribution, segment breakdown</div>
         </a>
-        <a href="daily_report.html" class="report-card" style="background:#161b27;border:1px solid #2d3748;border-radius:10px;padding:20px;display:block;transition:border-color .15s;color:#e2e8f0" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#2d3748'">
-          <div style="font-size:1.5em;margin-bottom:8px">🔨</div>
-          <div style="font-weight:600;margin-bottom:4px">Daily Auction Report</div>
-          <div style="font-size:0.82em;color:#475569">Today's BaT/pcarmarket activity and ending auctions</div>
+        <a href="daily_report.html" class="report-card">
+          <div class="report-icon">&#x1F528;</div>
+          <div class="report-title">Daily Auctions</div>
+          <div class="report-sub">Today&apos;s BaT / pcarmarket activity</div>
         </a>
-        <a href="weekly_report.html" class="report-card" style="background:#161b27;border:1px solid #2d3748;border-radius:10px;padding:20px;display:block;transition:border-color .15s;color:#e2e8f0" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#2d3748'">
-          <div style="font-size:1.5em;margin-bottom:8px">📅</div>
-          <div style="font-weight:600;margin-bottom:4px">Weekly Report</div>
-          <div style="font-size:0.82em;color:#475569">Week-over-week trends, new listings, price movements</div>
+        <a href="weekly_report.html" class="report-card">
+          <div class="report-icon">&#x1F4C5;</div>
+          <div class="report-title">Weekly Report</div>
+          <div class="report-sub">Week-over-week trends</div>
         </a>
-        <a href="monthly_report.html" class="report-card" style="background:#161b27;border:1px solid #2d3748;border-radius:10px;padding:20px;display:block;transition:border-color .15s;color:#e2e8f0" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#2d3748'">
-          <div style="font-size:1.5em;margin-bottom:8px">📈</div>
-          <div style="font-weight:600;margin-bottom:4px">Monthly Report</div>
-          <div style="font-size:0.82em;color:#475569">Monthly macro trends, comp volume, market direction</div>
-        </a>
-        <a href="live_feed.html" class="report-card" style="background:#161b27;border:1px solid #2d3748;border-radius:10px;padding:20px;display:block;transition:border-color .15s;color:#e2e8f0" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#2d3748'">
-          <div style="font-size:1.5em;margin-bottom:8px">⚡</div>
-          <div style="font-weight:600;margin-bottom:4px">Live Feed</div>
-          <div style="font-size:0.82em;color:#475569">Newest listings only — BaT, Rennlist, PCA Mart, pcarmarket</div>
+        <a href="monthly_report.html" class="report-card">
+          <div class="report-icon">&#x1F4C8;</div>
+          <div class="report-title">Monthly Report</div>
+          <div class="report-sub">Macro trends and market direction</div>
         </a>
       </div>
     </div>
@@ -921,51 +965,72 @@ button{{cursor:pointer;border:none;background:none;font:inherit;color:inherit}}
 </div><!-- /app -->
 
 <script>
+// ── Chip filter state ─────────────────────────────────────────────────────────
+var activeGens = [];
+var activeSrcs = [];
+
+function toggleChip(btn, type) {{
+  btn.classList.toggle('active');
+  if (type === 'gen') {{
+    var val = btn.dataset.val;
+    var idx = activeGens.indexOf(val);
+    if (idx > -1) activeGens.splice(idx,1); else activeGens.push(val);
+  }} else {{
+    var val = btn.dataset.val;
+    var idx = activeSrcs.indexOf(val);
+    if (idx > -1) activeSrcs.splice(idx,1); else activeSrcs.push(val);
+  }}
+  applyFilters();
+}}
+
 // ── View switching ────────────────────────────────────────────────────────────
-function switchView(name) {{
-  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+function switchView(name, el) {{
+  document.querySelectorAll('.view').forEach(function(v) {{ v.classList.remove('active'); }});
+  document.querySelectorAll('.nav-item').forEach(function(t) {{ t.classList.remove('active'); }});
   document.getElementById('view-' + name).classList.add('active');
-  event.target.classList.add('active');
+  if (el) el.classList.add('active');
   updateCount();
 }}
 
-// ── Filtering (main listings grid) ───────────────────────────────────────────
+// ── Main filter ───────────────────────────────────────────────────────────────
 function applyFilters() {{
-  const gen      = document.getElementById('f-gen').value.toLowerCase();
-  const model    = document.getElementById('f-model').value.toLowerCase();
-  const src      = document.getElementById('f-source').value.toLowerCase();
-  const yearMin  = parseInt(document.getElementById('f-year-min').value) || 0;
-  const yearMax  = parseInt(document.getElementById('f-year-max').value) || 9999;
-  const priceMin = parseInt(document.getElementById('f-price-min').value) || 0;
-  const priceMax = parseInt(document.getElementById('f-price-max').value) || 99999999;
-  // live feed filter removed — all sources shown by default
-  const dealsOnly= document.getElementById('f-deals').checked;
-  const tier1Only= document.getElementById('f-tier1').checked;
-  const q        = document.getElementById('search-box').value.toLowerCase();
+  var yearMin  = parseInt(document.getElementById('f-year-min').value) || 0;
+  var yearMax  = parseInt(document.getElementById('f-year-max').value) || 9999;
+  var priceMin = parseFloat(document.getElementById('f-price-min').value) || 0;
+  var priceMax = parseFloat(document.getElementById('f-price-max').value) || 99999999;
+  var dealsOnly= document.getElementById('f-deals').checked;
+  var tier1Only= document.getElementById('f-tier1').checked;
+  var q        = document.getElementById('search-box').value.toLowerCase();
 
-  const cards = document.querySelectorAll('#cards-grid .card');
-  let shown = 0;
-  cards.forEach(card => {{
-    const cardGen   = (card.dataset.gen   || '').toLowerCase();
-    const cardModel = (card.dataset.model || '').toLowerCase();
-    const cardSrc   = (card.dataset.dealer|| '').toLowerCase();
-    const cardYear  = parseInt(card.dataset.year) || 0;
-    const cardPrice = parseInt(card.dataset.price) || 0;
-    const cardTier  = (card.dataset.tier  || '').toUpperCase();
-    const cardFeed  = (card.dataset.feedType || '').toLowerCase();
-    const cardType  = (card.dataset.sourceType || '');
-    const cardText  = card.textContent.toLowerCase();
+  var cards = document.querySelectorAll('#cards-grid .card');
+  var shown = 0;
+  cards.forEach(function(card) {{
+    var cardGen   = (card.dataset.gen   || '').toLowerCase();
+    var cardYear  = parseInt(card.dataset.year) || 0;
+    var cardPrice = parseFloat(card.dataset.price) || 0;
+    var cardTier  = (card.dataset.tier  || '').toUpperCase();
+    var cardText  = card.textContent.toLowerCase();
+    var cardDealer= (card.dataset.dealer|| '').toLowerCase();
 
-    let show = true;
-    if (gen      && cardGen   !== gen)           show = false;
-    if (model    && cardModel !== model)          show = false;
-    if (src      && cardSrc   !== src)            show = false;
-    if (cardYear < yearMin || cardYear > yearMax) show = false;
-    if (cardPrice > 0 && (cardPrice < priceMin || cardPrice > priceMax)) show = false;
-    // live feed filter removed
-    if (tier1Only&& cardTier  !== 'TIER1')        show = false;
-    if (q && !cardText.includes(q))              show = false;
+    var show = true;
+    if (activeGens.length > 0) {{
+      var matched = false;
+      for (var i=0;i<activeGens.length;i++) {{
+        if (cardGen === activeGens[i].toLowerCase()) {{ matched=true; break; }}
+      }}
+      if (!matched) show = false;
+    }}
+    if (show && activeSrcs.length > 0) {{
+      var matched = false;
+      for (var i=0;i<activeSrcs.length;i++) {{
+        if (cardDealer.indexOf(activeSrcs[i].toLowerCase()) > -1) {{ matched=true; break; }}
+      }}
+      if (!matched) show = false;
+    }}
+    if (show && (cardYear < yearMin || cardYear > yearMax)) show = false;
+    if (show && cardPrice > 0 && (cardPrice < priceMin || cardPrice > priceMax)) show = false;
+    if (show && tier1Only && cardTier !== 'TIER1') show = false;
+    if (show && q && !cardText.includes(q)) show = false;
 
     card.style.display = show ? '' : 'none';
     if (show) shown++;
@@ -974,8 +1039,12 @@ function applyFilters() {{
 }}
 
 function resetFilters() {{
-  ['f-gen','f-model','f-source'].forEach(id => document.getElementById(id).value = '');
-  ['f-year-min','f-year-max','f-price-min','f-price-max'].forEach(id => document.getElementById(id).value = '');
+  activeGens = []; activeSrcs = [];
+  document.querySelectorAll('.chip').forEach(function(c) {{ c.classList.remove('active'); }});
+  document.getElementById('f-year-min').value = '';
+  document.getElementById('f-year-max').value = '';
+  document.getElementById('f-price-min').value = '';
+  document.getElementById('f-price-max').value = '';
   document.getElementById('f-deals').checked = false;
   document.getElementById('f-tier1').checked = false;
   document.getElementById('search-box').value = '';
@@ -983,75 +1052,67 @@ function resetFilters() {{
 }}
 
 function updateCount(n) {{
-  const el = document.getElementById('results-count');
-  if (el) {{
-    const total = document.querySelectorAll('#cards-grid .card').length;
-    el.textContent = n !== undefined ? n + ' of ' + total : total + ' listings';
-  }}
+  var el = document.getElementById('results-count');
+  if (!el) return;
+  var total = document.querySelectorAll('#cards-grid .card').length;
+  el.textContent = (n !== undefined ? n + ' of ' : '') + total + ' listings';
 }}
 
-// ── Comps table filtering & sorting ──────────────────────────────────────────
+// ── Comps filter / sort ───────────────────────────────────────────────────────
 function filterComps() {{
-  const q   = document.getElementById('comp-search').value.toLowerCase();
-  const gen = document.getElementById('comp-gen-filter').value.toLowerCase();
-  document.querySelectorAll('#comps-body .comp-row').forEach(row => {{
-    const text = row.textContent.toLowerCase();
-    const rowGen = (row.dataset.gen || '').toLowerCase();
-    let show = true;
-    if (q   && !text.includes(q))       show = false;
-    if (gen && rowGen !== gen)           show = false;
+  var q   = document.getElementById('comp-search').value.toLowerCase();
+  var gen = document.getElementById('comp-gen-filter').value.toLowerCase();
+  document.querySelectorAll('#comps-body .comp-row').forEach(function(row) {{
+    var text   = row.textContent.toLowerCase();
+    var rowGen = (row.dataset.gen || '').toLowerCase();
+    var show = true;
+    if (q && !text.includes(q)) show = false;
+    if (gen && rowGen !== gen) show = false;
     row.style.display = show ? '' : 'none';
   }});
 }}
 
-let _compSortDir = {{}};
+var _compSortDir = {{}};
 function sortComps(col) {{
-  const tbody = document.getElementById('comps-body');
-  const rows  = Array.from(tbody.querySelectorAll('.comp-row'));
-  const dir   = (_compSortDir[col] = !_compSortDir[col]);
-  const colMap = {{year:1, gen:3, mileage:5, price:6, date:7}};
-  const idx = colMap[col];
-  rows.sort((a, b) => {{
-    const av = a.cells[idx]?.textContent.replace(/[$,]/g,'').trim() || '';
-    const bv = b.cells[idx]?.textContent.replace(/[$,]/g,'').trim() || '';
-    const an = parseFloat(av), bn = parseFloat(bv);
-    const cmp = isNaN(an) ? av.localeCompare(bv) : an - bn;
+  var tbody = document.getElementById('comps-body');
+  var rows  = Array.from(tbody.querySelectorAll('.comp-row'));
+  var dir   = (_compSortDir[col] = !_compSortDir[col]);
+  var colMap = {{year:1, gen:3, mileage:5, price:6, date:7}};
+  var idx = colMap[col];
+  rows.sort(function(a, b) {{
+    var av = a.cells[idx] ? a.cells[idx].textContent.replace(/[$,]/g,'').trim() : '';
+    var bv = b.cells[idx] ? b.cells[idx].textContent.replace(/[$,]/g,'').trim() : '';
+    var an = parseFloat(av), bn = parseFloat(bv);
+    var cmp = isNaN(an) ? av.localeCompare(bv) : an - bn;
     return dir ? cmp : -cmp;
   }});
-  rows.forEach(r => tbody.appendChild(r));
+  rows.forEach(function(r) {{ tbody.appendChild(r); }});
 }}
 
-// ── Auction countdown timers ──────────────────────────────────────────────────
+// ── Countdown timers ──────────────────────────────────────────────────────────
 function updateCountdowns() {{
   document.querySelectorAll('.countdown[data-ends]').forEach(function(el) {{
     var ends = new Date(el.dataset.ends);
-    var now = new Date();
-    var diff = ends - now;
+    var diff = ends - new Date();
     if (diff <= 0) {{
       el.textContent = 'Ended';
-      el.style.color = '#ef4444';
       return;
     }}
     var d = Math.floor(diff / 86400000);
     var h = Math.floor((diff % 86400000) / 3600000);
     var m = Math.floor((diff % 3600000) / 60000);
     var s = Math.floor((diff % 60000) / 1000);
-    if (d > 0) {{
-      el.textContent = d + 'd ' + h + 'h ' + m + 'm';
-    }} else {{
-      el.textContent = h + 'h ' + m + 'm ' + s + 's';
-    }}
+    el.textContent = d > 0 ? (d + 'd ' + h + 'h ' + m + 'm') : (h + 'h ' + m + 'm ' + s + 's');
   }});
 }}
 
-// ── Init ─────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {{
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {{
   updateCount();
   updateCountdowns();
   setInterval(updateCountdowns, 1000);
 }});
 
-// ── PWA Service Worker ────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {{
   window.addEventListener('load', function() {{
     navigator.serviceWorker.register('/PTOX11/sw.js')
@@ -1070,4 +1131,4 @@ if ('serviceWorker' in navigator) {{
 
 if __name__ == "__main__":
     path = generate()
-    print(f"New dashboard: file://{path}")
+    print(f"Dashboard: file://{path}")
