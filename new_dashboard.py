@@ -248,6 +248,9 @@ def _card(car: dict, fmv_score: dict) -> str:
     fmv_bar    = _fmv_bar_block(price, fmv_val, conf, comp_count)
     age_str    = _age_label(created)
     gen_str    = _gen(year, model)
+    # Badge label used for source chip filtering
+    k = (dealer or "").lower().strip()
+    src_label  = _BADGE_CFG.get(k, (None, None, (dealer or "")[:12]))[2]
 
     # Deal badge — only show if 10%+ below FMV
     deal_badge = ""
@@ -322,6 +325,7 @@ def _card(car: dict, fmv_score: dict) -> str:
         f'<div class="card" '
         f'data-dealer="{_h(dealer)}" data-year="{year}" data-model="{_h(model)}" '
         f'data-gen="{_h(gen_str)}" data-tier="{_h(tier)}" data-price="{price or 0}" '
+        f'data-src-label="{_h(src_label)}" '
         f'data-source-type="{"auction" if is_auc else "retail"}" '
         f'onclick="window.open(\'{_h(url)}\',\'_blank\')">\n'
         f'  {img_html}\n'
@@ -1019,12 +1023,12 @@ function applyFilters() {{
   var cards = document.querySelectorAll('#cards-grid .card');
   var shown = 0;
   cards.forEach(function(card) {{
-    var cardGen   = (card.dataset.gen   || '').toLowerCase();
-    var cardYear  = parseInt(card.dataset.year) || 0;
-    var cardPrice = parseFloat(card.dataset.price) || 0;
-    var cardTier  = (card.dataset.tier  || '').toUpperCase();
-    var cardText  = card.textContent.toLowerCase();
-    var cardDealer= (card.dataset.dealer|| '').toLowerCase();
+    var cardGen      = (card.dataset.gen      || '').toLowerCase();
+    var cardYear     = parseInt(card.dataset.year) || 0;
+    var cardPrice    = parseFloat(card.dataset.price) || 0;
+    var cardTier     = (card.dataset.tier     || '').toUpperCase();
+    var cardText     = card.textContent.toLowerCase();
+    var cardSrcLabel = (card.dataset.srcLabel || '').toLowerCase();
 
     var show = true;
     if (activeGens.length > 0) {{
@@ -1037,7 +1041,7 @@ function applyFilters() {{
     if (show && activeSrcs.length > 0) {{
       var matched = false;
       for (var i=0;i<activeSrcs.length;i++) {{
-        if (cardDealer.indexOf(activeSrcs[i].toLowerCase()) > -1) {{ matched=true; break; }}
+        if (cardSrcLabel === activeSrcs[i].toLowerCase()) {{ matched=true; break; }}
       }}
       if (!matched) show = false;
     }}
