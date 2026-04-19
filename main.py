@@ -49,7 +49,7 @@ import report as rpt
 import daily_report
 import weekly_report
 import monthly_report
-import notify_imessage
+import notify_push
 import health_monitor
 
 
@@ -342,21 +342,21 @@ def main():
                 if len(fresh_ids) != len(new_ids):
                     log.info("Alert filter: %d new IDs, %d within 20min window — alerting only fresh",
                              len(new_ids), len(fresh_ids))
-                notify_imessage.notify_new_listings(conn, fresh_ids)
+                notify_push.notify_new_listings(conn, fresh_ids)
             else:
-                notify_imessage.notify_new_listings(conn, new_ids)
+                notify_push.notify_new_listings(conn, new_ids)
     except Exception as e:
-        log.warning("iMessage new-listing alerts failed: %s", e)
+        log.warning("Push new-listing alerts failed: %s", e)
 
     # iMessage deal alerts — TEMPORARILY DISABLED (re-enable when ready)
-    # notify_imessage.main()
+    # notify_push.main()
 
     # iMessage auction-ending alerts (3hr Tier1, 1hr Tier2)
     try:
         with database.get_conn() as conn:
-            notify_imessage.notify_auction_ending(conn)
+            notify_push.notify_auction_ending(conn)
     except Exception as e:
-        log.warning("iMessage auction-ending alerts failed: %s", e)
+        log.warning("Push auction-ending alerts failed: %s", e)
 
     # Health monitor
     try:
