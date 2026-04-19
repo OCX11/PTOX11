@@ -455,6 +455,7 @@ def generate() -> str:
                 "src":  _BADGE_CFG.get((c.get("dealer") or "").lower().strip(), (None,None,(c.get("dealer") or "")[:12]))[2],
                 "tier": c.get("tier") or "",
                 "deal": pct is not None and pct <= -10,
+                "cool": ("air" if (int(c.get("year") or 0) <= 1998 and "911" in (c.get("model") or "").lower()) else ("water" if (int(c.get("year") or 0) >= 1999 and "911" in (c.get("model") or "").lower()) else None)),
                 "txt":  ((str(c.get("year") or "") + " " + (c.get("model") or "") + " " +
                           (c.get("dealer") or "") + " " + _gen(c.get("year"), c.get("model")))).lower(),
             })
@@ -519,7 +520,8 @@ button {{ cursor:pointer; border:none; background:none; font:inherit; color:inhe
   display:flex; align-items:center; justify-content:space-between;
   padding:0 24px; gap:16px; z-index:50;
 }}
-.topbar-left {{ display:flex; align-items:center; gap:4px; }}
+.topbar-left {{ display:flex; align-items:center; gap:4px; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }}
+.topbar-left::-webkit-scrollbar {{ display:none; }}
 .logo {{
   font-family:'Syne',sans-serif; font-size:14px; font-weight:800;
   color:var(--text); letter-spacing:2px; margin-right:20px; white-space:nowrap;
@@ -879,6 +881,9 @@ button {{ cursor:pointer; border:none; background:none; font:inherit; color:inhe
   .filter-fab {{ display:flex; }}
   .search-input {{ width:150px; }}
   .search-input:focus {{ width:190px; }}
+  .nav-item {{ padding:0 10px; font-size:11px; }}
+  .logo {{ margin-right:10px; font-size:13px; }}
+  .topbar {{ padding:0 12px; }}
 }}
 </style>
 </head>
@@ -912,6 +917,14 @@ button {{ cursor:pointer; border:none; background:none; font:inherit; color:inhe
 
 <!-- ── Sidebar ── -->
 <aside class="sidebar">
+  <div class="filter-group">
+    <span class="filter-group-label">Cooling</span>
+    <div class="chip-row">
+      <button class="chip" data-val="Air-cooled" onclick="toggleCooling(this,&apos;air&apos;)" title="911s 1998 &amp; earlier">Air-cooled</button>
+      <button class="chip" data-val="Water-cooled" onclick="toggleCooling(this,&apos;water&apos;)" title="911s 1999 &amp; newer">Water-cooled</button>
+    </div>
+  </div>
+
   <div class="filter-group">
     <span class="filter-group-label">Generation</span>
     <div class="chip-row" id="gen-chips">
@@ -1091,6 +1104,13 @@ button {{ cursor:pointer; border:none; background:none; font:inherit; color:inhe
   <span class="drawer-handle"></span>
   <div class="drawer-title">Filters</div>
   <div class="drawer-grid">
+    <div class="drawer-section" style="grid-column:1/-1">
+      <span class="drawer-section-label">Cooling</span>
+      <div class="drawer-chips">
+        <button class="chip" data-val="Air-cooled" onclick="toggleCooling(this,&apos;air&apos;)" title="911s 1998 &amp; earlier">Air-cooled</button>
+        <button class="chip" data-val="Water-cooled" onclick="toggleCooling(this,&apos;water&apos;)" title="911s 1999 &amp; newer">Water-cooled</button>
+      </div>
+    </div>
     <div class="drawer-section">
       <span class="drawer-section-label">Generation</span>
       <div class="drawer-chips" id="d-gen-chips">
@@ -1141,6 +1161,20 @@ var PAGE = 48;
 // ── Chip filter state ─────────────────────────────────────────────────────────
 var activeGens = [];
 var activeSrcs = [];
+var activeCooling = null;
+
+function toggleCooling(btn, type) {{
+  if (activeCooling === type) {{
+    activeCooling = null;
+    document.querySelectorAll('.chip[data-val="Air-cooled"],.chip[data-val="Water-cooled"]').forEach(function(c) {{ c.classList.remove('active'); }});
+  }} else {{
+    document.querySelectorAll('.chip[data-val="Air-cooled"],.chip[data-val="Water-cooled"]').forEach(function(c) {{ c.classList.remove('active'); }});
+    activeCooling = type;
+    btn.classList.add('active');
+  }}
+  applyFilters();
+  updateFabState();
+}}
 
 function toggleChip(btn, type) {{
   btn.classList.toggle('active');
@@ -1178,6 +1212,7 @@ function applyFilters() {{
     if (activeSrcs.length && activeSrcs.indexOf(d.src) === -1) return false;
     if (dealsOnly && !d.deal) return false;
     if (tier1Only && d.tier !== 'TIER1') return false;
+    if (activeCooling && d.cool !== activeCooling) return false;
     return true;
   }});
 
@@ -1219,6 +1254,7 @@ if (_ca) {{
 
 function resetFilters() {{
   activeGens = []; activeSrcs = [];
+  activeCooling = null;
   document.querySelectorAll('.chip').forEach(function(c) {{ c.classList.remove('active'); }});
   ['f-year-min','f-year-max','f-price-min','f-price-max',
    'd-year-min','d-year-max','d-price-min','d-price-max'].forEach(function(id) {{
@@ -1271,7 +1307,7 @@ function updateFabState() {{
     document.getElementById('f-price-min').value ||
     document.getElementById('f-deals').checked ||
     document.getElementById('f-tier1').checked;
-  fab.classList.toggle('has-filters', !!on);
+  fab.classList.toggle('has-filters', !!(on || activeCooling));
 }}
 
 // ── View switcher ─────────────────────────────────────────────────────────────
@@ -1282,12 +1318,8 @@ function switchView(name, btn) {{
   var v = document.getElementById('view-' + name);
   if (v) v.classList.add('active');
   if (btn) btn.classList.add('active');
-  // Re-render listings only if switching back from another tab
-  if (name === 'listings' && _currentView !== 'listings') {{
-    // Listings are already rendered — just restart countdowns
-    startCountdowns();
-  }}
   _currentView = name;
+  if (name === 'listings') startCountdowns();
 }}
 
 // ── Smart auto-refresh (no reload, no filter wipe) ───────────────────────────
